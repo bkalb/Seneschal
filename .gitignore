@@ -49,3 +49,5 @@ next-env.d.ts
 
 # Top-level markdown files
 /*.md
+!AGENTS.md
+!CLAUDE.md
