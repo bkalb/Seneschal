@@ -1,0 +1,495 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Auth (better-auth required models) ──────────────────────────────────────
+
+model User {
+  id            String     @id @default(cuid())
+  name          String?
+  email         String     @unique
+  emailVerified Boolean    @default(false)
+  image         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  campaigns Campaign[]
+  sessions  Session[]
+  accounts  Account[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String    @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+}
+
+// ─── Campaign ─────────────────────────────────────────────────────────────────
+
+model Campaign {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Campaign-wide defaults for encounter rolls.
+  // surpriseDice/surpriseThreshold: pre-populate the surprise fields when importing
+  // an ENCOUNTER table. The table-level values take precedence if set.
+  defaultSurpriseDice      String?
+  defaultSurpriseThreshold Int?
+  // When set, this reaction table is used for all encounter rolls instead of
+  // the first REACTION-category table found.
+  defaultReactionTableId   String?
+  // When set, this morale table is displayed as the default morale check.
+  defaultMoraleTableId     String?
+  // Named time windows for encounter timing, e.g. Day (6–18) and Night (18–6).
+  // JSON: { name: string, startHour: number, startMinute: number, endHour: number, endMinute: number }[]
+  encounterWindowsJson     String   @default("[]")
+
+  // Campaign-wide defaults for combat combatant stats (pre-fill when adding combatants).
+  defaultCombatAC              Int?
+  defaultCombatHD              String?  // e.g. "1d8"
+  defaultCombatAttackBonus     Int?
+  defaultCombatAttackDamage    String?  // e.g. "1d6"
+  defaultRollHpIndividually    Boolean  @default(false)
+  defaultTraitTableId          String?
+  defaultTraitCount            Int?
+
+  state             CampaignState?
+  regions           Region[]
+  rulesSections     RulesSection[]
+  randomTables      RandomTable[]
+  npcProfiles       NpcProfile[]
+  npcAffiliations   NpcAffiliation[]
+  savedNpcs         SavedNpc[]
+  calendarConfig    CalendarConfig?
+  calendarNotes     CalendarNote[]
+  flags             CampaignFlag[]
+  dungeonConfig     DungeonConfig?
+  lightSourceTypes  LightSourceType[]
+  activeLightSources ActiveLightSource[]
+  combatEncounters  CombatEncounter[]
+}
+
+model CampaignState {
+  id                    String   @id @default(cuid())
+  campaignId            String   @unique
+  campaign              Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  currentRegionId       String?
+  currentRegion         Region?  @relation(fields: [currentRegionId], references: [id], onDelete: SetNull)
+  // "YYYY-MM-DD" using the campaign's custom calendar
+  currentDate           String   @default("0001-01-01")
+  // "OVERLAND" | "DUNGEON" | "COMBAT"
+  mode                  String   @default("OVERLAND")
+  // Current in-dungeon time, e.g. "09:30 AM"
+  currentTime           String   @default("12:00 PM")
+  // The active dungeon location (separate from overland currentRegionId)
+  currentDungeonRegionId String?
+  // When true, Advance Day rolls weather one day ahead so the GM sees today + tomorrow
+  forecastingMode       Boolean  @default(false)
+  // JSON array of today's weather rolls: [{ tableId, tableName, outcome, roll }]
+  todayWeatherJson      String?
+  updatedAt             DateTime @updatedAt
+}
+
+// ─── Regions ──────────────────────────────────────────────────────────────────
+
+model Region {
+  id             String   @id @default(cuid())
+  campaignId     String
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name           String
+  // When true, switching to this region re-rolls weather and encounters for the current day.
+  rerollOnSwitch Boolean  @default(false)
+  // "OVERLAND" | "DUNGEON" | "BOTH"
+  regionType     String   @default("OVERLAND")
+
+  campaignStates       CampaignState[]
+  autoModifiers        TableModifier[]     @relation("ModifierAutoRegions")
+  conditionalModifiers TableModifier[]     @relation("ModifierConditionalRegions")
+  tables               RandomTableRegion[]
+}
+
+// ─── Rules Sections ───────────────────────────────────────────────────────────
+
+model RulesSection {
+  id              String   @id @default(cuid())
+  campaignId      String
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  title           String
+  content         String   // TipTap JSON string
+  sortOrder       Int      @default(0)
+  // "OVERLAND" | "DUNGEON" | "BOTH"
+  applicableModes String   @default("BOTH")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ─── Random Tables ────────────────────────────────────────────────────────────
+
+// Table categories:
+//   NPC       — used by the NPC Generator
+//   ENCOUNTER — used by the Random Encounter Generator
+//   CALENDAR  — rolled on day advance (weather, etc.)
+model RandomTable {
+  id               String   @id @default(cuid())
+  campaignId       String
+  campaign         Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name             String
+  category         String   @default("ENCOUNTER") // "NPC" | "ENCOUNTER" | "CALENDAR"
+  diceExpression   String   // "1d8", "2d6", "1d100"
+  isStateful       Boolean  @default(false)
+  lastResult       Int?     // pre-modifier raw dice total; null if never rolled
+  lastModifiedResult Int?   // post-modifier total; used by PREV_RESULT_CONDITION modifiers
+  // Forecasting: pre-rolled result for the *next* day (populated when forecastingMode is on)
+  forecastResult         Int?
+  forecastModifiedResult Int?
+  forecastDate           String?  // "YYYY-MM-DD" the forecast is valid for
+  forecastOutcome        String?  // resolved outcome text for the forecast day
+  rollOnDayAdvance Boolean  @default(false)
+  // If set, this table only auto-rolls when the current season name matches exactly.
+  // rollWhenNoSeason controls behaviour when there is no active season or no match.
+  seasonName       String?  // null = always roll regardless of season
+  rollWhenNoSeason String   @default("always") // "always" | "skip"
+  // Persistent manual adjustment applied on every day-advance roll (GM-controlled).
+  manualModifier   Int      @default(0)
+  // Surprise roll config (ENCOUNTER tables only).
+  // Roll surpriseDice; if result <= surpriseThreshold the creatures are surprised.
+  surpriseDice      String?
+  surpriseThreshold Int?
+  // For NPC name tables: tag with what type (e.g. "Ruislip") and gender they apply to.
+  // null = any. Used by the generator to auto-select the right name table.
+  npcForType       String?
+  npcForGender     String?  // "male" | "female" | null
+  // Which exploration modes this table is relevant to: "OVERLAND" | "DUNGEON" | "BOTH"
+  applicableModes  String   @default("BOTH")
+  sortOrder        Int      @default(0)
+  // Optional prerequisite die check: roll this dice first; only proceed to the main
+  // table roll if the result falls within [prerequisiteMin, prerequisiteMax] (inclusive).
+  // e.g. prerequisiteDice="1d6", prerequisiteMin=1, prerequisiteMax=2 means
+  // "roll 1d6; only roll on this table if the result is 1 or 2".
+  prerequisiteDice String?
+  prerequisiteMin  Int?
+  prerequisiteMax  Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  rows      TableRow[]
+  modifiers TableModifier[]
+  regions   RandomTableRegion[]
+}
+
+// Junction: table ↔ region (many-to-many)
+model RandomTableRegion {
+  tableId  String
+  regionId String
+  table    RandomTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  region   Region      @relation(fields: [regionId], references: [id], onDelete: Cascade)
+
+  @@id([tableId, regionId])
+}
+
+model TableRow {
+  id      String      @id @default(cuid())
+  tableId String
+  table   RandomTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  min     Int
+  max     Int
+  // Raw outcome text; may contain inline dice notation like "2d20 Bandits"
+  outcome String
+}
+
+// Modifier behavior (stored as string):
+//   ALWAYS             — always visible as a user toggle
+//   AUTO_REGION        — fires automatically when currentRegion is in autoRegions
+//   CONDITIONAL_REGION — shown as toggle only when currentRegion is in conditionalRegions
+model TableModifier {
+  id             String      @id @default(cuid())
+  tableId        String
+  table          RandomTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  label          String
+  behavior       String      // "ALWAYS" | "AUTO_REGION" | "CONDITIONAL_REGION"
+  rollAdjustment Int         @default(0)
+  // JSON for non-additive effects e.g. { type: "multiply_chance", factor: 2 }
+  extraConfig    String?
+
+  autoRegions        Region[] @relation("ModifierAutoRegions")
+  conditionalRegions Region[] @relation("ModifierConditionalRegions")
+}
+
+// ─── NPC Profiles ────────────────────────────────────────────────────────────
+//
+// Multiple named profiles per campaign (e.g. "Random NPC", "Ergyng NPC").
+// Each stores an ordered list of roll steps as JSON.
+
+model NpcProfile {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name       String
+  stepsJson  String   @default("[]")
+  sortOrder  Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+// ─── Saved NPCs ───────────────────────────────────────────────────────────────
+//
+// Persisted NPCs that the GM has explicitly saved after generation.
+// Affiliations optionally group saved NPCs (e.g. "Bogrim's Bandits").
+
+model NpcAffiliation {
+  id         String     @id @default(cuid())
+  campaignId String
+  campaign   Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name       String
+  createdAt  DateTime   @default(now())
+
+  savedNpcs  SavedNpc[]
+
+  @@index([campaignId])
+}
+
+model SavedNpc {
+  id              String          @id @default(cuid())
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  affiliationId   String?
+  affiliation     NpcAffiliation? @relation(fields: [affiliationId], references: [id], onDelete: SetNull)
+
+  // Core generated fields
+  name            String?
+  gender          String          // "male" | "female"
+  age             String?
+  type            String?
+  typeLabel       String
+  secondaryType   String?
+  secondaryTypeLabel String?
+
+  // JSON arrays: string[]
+  physicalJson    String          @default("[]")
+  personalityJson String          @default("[]")
+  // JSON array: { label: string; value: string }[]
+  detailsJson     String          @default("[]")
+
+  // Status
+  isDeceased      Boolean         @default(false)
+  isPinned        Boolean         @default(false)
+  notes           String?
+
+  // Combatant trait — when enabled, this NPC can be added to combat encounters
+  isCombatant     Boolean         @default(false)
+  combatAc        Int?
+  combatHd        String?         // e.g. "2d8"
+  combatMaxHp     Int?
+  combatAttackBonus Int?
+  combatAttackDamage String?      // e.g. "1d6+1"
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([campaignId, createdAt])
+  @@index([campaignId, name])
+  @@index([campaignId, isPinned])
+  @@index([campaignId, isCombatant])
+}
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+
+model CalendarConfig {
+  id              String   @id @default(cuid())
+  campaignId      String   @unique
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  // JSON: { name: string, days: number }[]
+  monthsJson      String
+  // JSON: string[]
+  weekdaysJson    String
+  // JSON: { name, startMonth, startDay, endMonth, endDay }[]
+  seasonsJson     String
+  // JSON: { name, afterMonth, days, outsideWeeks }[] | null
+  intercalaryJson String?
+  // "YYYY-MM-DD" using campaign calendar — start date of the campaign
+  epochDate       String   @default("0001-01-01")
+  updatedAt       DateTime @updatedAt
+
+  moons Moon[]
+}
+
+model Moon {
+  id               String         @id @default(cuid())
+  configId         String
+  config           CalendarConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  name             String
+  cycleLength      Int
+  // A known new-moon date in "YYYY-MM-DD" used as reference epoch
+  referenceNewMoon String
+}
+
+// ─── Flags ────────────────────────────────────────────────────────────────────
+//
+// Short persistent reminders displayed left-to-right at the top of the dashboard.
+// Optionally count up or down each time the in-game day advances.
+
+model CampaignFlag {
+  id             String   @id @default(cuid())
+  campaignId     String
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  label          String
+  // One of the 16 preset hex swatches
+  color          String   @default("#fecdd3")
+  // null = no counter; otherwise the current count value
+  counter        Int?
+  // "up" | "down" | null — null when no counter
+  countDirection String?
+  // When true the counter does not tick on day advance
+  paused         Boolean  @default(false)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([campaignId, sortOrder])
+}
+
+model CalendarNote {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  // "YYYY-MM-DD" in campaign's custom calendar
+  date       String
+  content    String   // TipTap JSON string
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([campaignId, date])
+}
+
+// ─── Dungeon exploration ──────────────────────────────────────────────────────
+
+model DungeonConfig {
+  id                   String   @id @default(cuid())
+  campaignId           String   @unique
+  campaign             Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  // How many turns make up one hour of dungeon exploration
+  turnsPerHour         Int      @default(6)
+  // JSON: number[] — 1-indexed turn numbers within each hour that trigger an encounter check
+  // e.g. [2, 5] means turns 2 and 5 of each hour
+  encounterTurnsJson   String   @default("[2,5]")
+  updatedAt            DateTime @updatedAt
+}
+
+// Campaign-level library of named light source types (torch, lantern, etc.)
+model LightSourceType {
+  id              String   @id @default(cuid())
+  campaignId      String
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name            String
+  // Default duration in turns
+  defaultDuration Int
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  activeSources ActiveLightSource[]
+}
+
+// Currently burning light sources — tracked turn by turn
+model ActiveLightSource {
+  id             String           @id @default(cuid())
+  campaignId     String
+  campaign       Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  // null = ad-hoc (not based on a defined type)
+  typeId         String?
+  type           LightSourceType? @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  // Display name, e.g. "Torch (Thorin)"
+  name           String
+  carrierName    String
+  remainingTurns Int
+  paused         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+// ─── Combat ───────────────────────────────────────────────────────────────────
+
+// One active encounter per campaign at a time (isActive flag).
+model CombatEncounter {
+  id           String       @id @default(cuid())
+  campaignId   String
+  campaign     Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name         String?
+  isActive     Boolean      @default(true)
+  currentRound Int          @default(1)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  sides CombatSide[]
+
+  @@index([campaignId, isActive])
+}
+
+// A group of combatants on one side of an encounter (e.g. "Orcs", "Bandits").
+model CombatSide {
+  id             String          @id @default(cuid())
+  encounterId    String
+  encounter      CombatEncounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  name           String
+  sortOrder      Int             @default(0)
+  actedThisRound Boolean         @default(false)
+  isPlayerSide   Boolean         @default(false)
+
+  combatants CombatCombatant[]
+}
+
+// An individual combatant tracked within a combat encounter.
+model CombatCombatant {
+  id            String     @id @default(cuid())
+  sideId        String
+  side          CombatSide @relation(fields: [sideId], references: [id], onDelete: Cascade)
+  name          String
+  sortOrder     Int        @default(0)
+  ac            Int        @default(9)
+  hd            String     @default("1d8")
+  maxHp         Int        @default(8)
+  currentHp     Int        @default(8)
+  attackBonus   Int        @default(0)
+  attackDamage  String     @default("1d6")
+  notes         String?
+  updatedAt     DateTime   @updatedAt
+}
