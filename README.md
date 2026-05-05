@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Seneschal
 
-## Getting Started
+A Next.js application for tabletop RPG game masters. Manages campaigns, random tables, NPC generation, calendar tracking, dungeon exploration, and combat encounters. Designed for local network use.
 
-First, run the development server:
+## Setup
+
+### Prerequisites
+
+- Node.js 20+
+- npm
+
+### First-time setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/billykalb/Seneschal.git
+cd Seneschal
+npm install
+npx prisma generate
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create a `.env` file in the project root:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+DATABASE_URL="file:./dev.db"
+BETTER_AUTH_SECRET="your-long-random-secret"
+BETTER_AUTH_URL="http://<host-ip>:3000"
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Run migrations to initialize the database:
 
-## Learn More
+```bash
+npx prisma migrate deploy
+```
 
-To learn more about Next.js, take a look at the following resources:
+### Running the app
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Development:**
+```bash
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Production:**
+```bash
+npm run build
+npm run start
+```
 
-## Deploy on Vercel
+Open `http://<host>:3000` in your browser.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Commands
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run dev          # Start development server
+npm run build        # Build for production
+npm run start        # Start production server
+npm run lint         # Run ESLint
+```
+
+**Database:**
+```bash
+npx prisma migrate dev     # Apply migrations (dev)
+npx prisma migrate deploy  # Apply migrations (production)
+npx prisma generate        # Regenerate Prisma client after schema changes
+npx prisma studio          # Open Prisma Studio UI
+```
