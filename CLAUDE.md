@@ -113,3 +113,64 @@ Required `.env` variables:
 - `DATABASE_URL` — SQLite file path (e.g., `file:./dev.db`)
 - `BETTER_AUTH_SECRET` — secret for session signing
 - `BETTER_AUTH_URL` — base URL for auth callbacks
+
+## Troubleshooting: Deploying Code Updates to the Local Server
+
+When pulling updated code onto the production server (`root@seneschal`), a plain `npm run build && npm run start` is often not enough. Work through this checklist if the build fails or the app misbehaves after an update.
+
+### 1. Stale Prisma client (most common)
+
+**Symptom:** TypeScript build error like `Object literal may only specify known properties, and 'fieldName' does not exist in type '...'`, or runtime `Unknown argument` errors.
+
+**Cause:** The generated Prisma client in `node_modules/.prisma/client` is out of date relative to `prisma/schema.prisma`. `git pull` updates the schema file but not the generated types.
+
+**Fix:**
+```bash
+npx prisma generate
+npm run build && npm run start
+```
+
+### 2. Pending database migrations
+
+**Symptom:** Runtime errors referencing missing columns or tables, or Prisma errors about schema drift.
+
+**Cause:** New migrations were added to `prisma/migrations/` but haven't been applied to the server's database.
+
+**Fix:**
+```bash
+npx prisma migrate deploy   # applies pending migrations in production
+npm run build && npm run start
+```
+
+Use `migrate deploy` (not `migrate dev`) on the server — it applies existing migrations without generating new ones.
+
+### 3. New or changed dependencies
+
+**Symptom:** Module not found errors, or unexpected runtime crashes after a pull that added/changed packages.
+
+**Cause:** `package.json` or `package-lock.json` changed but `node_modules` wasn't updated.
+
+**Fix:**
+```bash
+npm install
+npm run build && npm run start
+```
+
+### 4. Environment variables
+
+**Symptom:** Auth failures, database connection errors, or missing config at runtime.
+
+**Cause:** A new `.env` variable was added in code but not set on the server.
+
+**Fix:** Check `.env` against any new variables referenced in the codebase (search for `process.env.`) and add missing values.
+
+### Full update sequence (when in doubt)
+
+Run all steps together to cover every case:
+```bash
+git pull
+npm install
+npx prisma migrate deploy
+npx prisma generate
+npm run build && npm run start
+```

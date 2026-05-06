@@ -39,6 +39,12 @@ const tableSchema = z.object({
   surpriseDice: z.string().nullable().optional(),
   surpriseThreshold: z.number().int().nullable().optional(),
   sortOrder: z.number().int().default(0),
+  applicableModes: z.string().default("BOTH"),
+  npcForType: z.string().nullable().optional(),
+  npcForGender: z.string().nullable().optional(),
+  prerequisiteDice: z.string().nullable().optional(),
+  prerequisiteMin: z.number().int().nullable().optional(),
+  prerequisiteMax: z.number().int().nullable().optional(),
   rows: z.array(rowSchema).default([]),
   regionNames: z.array(z.string()).default([]),
   modifiers: z.array(modifierSchema).default([]),
@@ -94,11 +100,24 @@ const flagSchema = z.object({
 const regionSchema = z.object({
   name: z.string(),
   rerollOnSwitch: z.boolean().default(false),
+  regionType: z.string().default("OVERLAND"),
 });
 
 const rulesSectionSchema = z.object({
   title: z.string(),
   content: z.string(),
+  sortOrder: z.number().int().default(0),
+  applicableModes: z.string().default("BOTH"),
+});
+
+const dungeonConfigSchema = z.object({
+  turnsPerHour: z.number().int().default(6),
+  encounterTurnsJson: z.string().default("[2,5]"),
+});
+
+const lightSourceTypeSchema = z.object({
+  name: z.string(),
+  defaultDuration: z.number().int(),
   sortOrder: z.number().int().default(0),
 });
 
@@ -109,8 +128,23 @@ const importSchema = z.object({
     defaultSurpriseDice: z.string().nullable().optional(),
     defaultSurpriseThreshold: z.number().int().nullable().optional(),
     defaultReactionTableName: z.string().nullable().optional(),
+    defaultMoraleTableName: z.string().nullable().optional(),
     encounterWindowsJson: z.string().default("[]"),
-    state: z.object({ currentDate: z.string().default("0001-01-01") }).optional(),
+    defaultCombatAC: z.number().int().nullable().optional(),
+    defaultCombatHD: z.string().nullable().optional(),
+    defaultCombatAttackBonus: z.number().int().nullable().optional(),
+    defaultCombatAttackDamage: z.string().nullable().optional(),
+    defaultRollHpIndividually: z.boolean().default(false),
+    defaultTraitTableName: z.string().nullable().optional(),
+    defaultTraitCount: z.number().int().nullable().optional(),
+    state: z.object({
+      currentDate: z.string().default("0001-01-01"),
+      mode: z.string().default("OVERLAND"),
+      currentTime: z.string().default("12:00 PM"),
+      forecastingMode: z.boolean().default(false),
+      currentRegionName: z.string().nullable().optional(),
+      currentDungeonRegionName: z.string().nullable().optional(),
+    }).optional(),
     regions: z.array(regionSchema).default([]),
     rulesSections: z.array(rulesSectionSchema).default([]),
     randomTables: z.array(tableSchema).default([]),
@@ -118,6 +152,8 @@ const importSchema = z.object({
     calendarConfig: calendarConfigSchema.nullable().optional(),
     calendarNotes: z.array(noteSchema).default([]),
     flags: z.array(flagSchema).default([]),
+    dungeonConfig: dungeonConfigSchema.nullable().optional(),
+    lightSourceTypes: z.array(lightSourceTypeSchema).default([]),
   }),
 });
 
@@ -147,8 +183,19 @@ export async function POST(request: NextRequest) {
       defaultSurpriseDice: src.defaultSurpriseDice ?? null,
       defaultSurpriseThreshold: src.defaultSurpriseThreshold ?? null,
       encounterWindowsJson: src.encounterWindowsJson,
+      defaultCombatAC: src.defaultCombatAC ?? null,
+      defaultCombatHD: src.defaultCombatHD ?? null,
+      defaultCombatAttackBonus: src.defaultCombatAttackBonus ?? null,
+      defaultCombatAttackDamage: src.defaultCombatAttackDamage ?? null,
+      defaultRollHpIndividually: src.defaultRollHpIndividually,
+      defaultTraitCount: src.defaultTraitCount ?? null,
       state: {
-        create: { currentDate: src.state?.currentDate ?? "0001-01-01" },
+        create: {
+          currentDate: src.state?.currentDate ?? "0001-01-01",
+          mode: src.state?.mode ?? "OVERLAND",
+          currentTime: src.state?.currentTime ?? "12:00 PM",
+          forecastingMode: src.state?.forecastingMode ?? false,
+        },
       },
     },
   });
@@ -161,9 +208,27 @@ export async function POST(request: NextRequest) {
         campaignId: newCampaign.id,
         name: r.name,
         rerollOnSwitch: r.rerollOnSwitch,
+        regionType: r.regionType,
       },
     });
     regionNameToId.set(r.name, newRegion.id);
+  }
+
+  // Restore current region references on state now that regions exist
+  const currentRegionId = src.state?.currentRegionName
+    ? (regionNameToId.get(src.state.currentRegionName) ?? null)
+    : null;
+  const currentDungeonRegionId = src.state?.currentDungeonRegionName
+    ? (regionNameToId.get(src.state.currentDungeonRegionName) ?? null)
+    : null;
+  if (currentRegionId || currentDungeonRegionId) {
+    await prisma.campaignState.update({
+      where: { campaignId: newCampaign.id },
+      data: {
+        ...(currentRegionId ? { currentRegionId } : {}),
+        ...(currentDungeonRegionId ? { currentDungeonRegionId } : {}),
+      },
+    });
   }
 
   // ── Rules sections ─────────────────────────────────────────────────────────
@@ -174,6 +239,7 @@ export async function POST(request: NextRequest) {
         title: s.title,
         content: s.content,
         sortOrder: s.sortOrder,
+        applicableModes: s.applicableModes,
       },
     });
   }
@@ -196,6 +262,12 @@ export async function POST(request: NextRequest) {
         surpriseDice: t.surpriseDice ?? null,
         surpriseThreshold: t.surpriseThreshold ?? null,
         sortOrder: t.sortOrder,
+        applicableModes: t.applicableModes,
+        npcForType: t.npcForType ?? null,
+        npcForGender: t.npcForGender ?? null,
+        prerequisiteDice: t.prerequisiteDice ?? null,
+        prerequisiteMin: t.prerequisiteMin ?? null,
+        prerequisiteMax: t.prerequisiteMax ?? null,
         rows: {
           create: t.rows.map((r) => ({ min: r.min, max: r.max, outcome: r.outcome })),
         },
@@ -237,15 +309,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── defaultReactionTableId — resolved by name after tables are created ─────
+  // ── Campaign-level table references — resolved by name after tables exist ──
+  const campaignTableUpdates: Record<string, string | null> = {};
   if (src.defaultReactionTableName) {
-    const reactionTableId = tableNameToId.get(src.defaultReactionTableName) ?? null;
-    if (reactionTableId) {
-      await prisma.campaign.update({
-        where: { id: newCampaign.id },
-        data: { defaultReactionTableId: reactionTableId },
-      });
-    }
+    const id = tableNameToId.get(src.defaultReactionTableName) ?? null;
+    if (id) campaignTableUpdates.defaultReactionTableId = id;
+  }
+  if (src.defaultMoraleTableName) {
+    const id = tableNameToId.get(src.defaultMoraleTableName) ?? null;
+    if (id) campaignTableUpdates.defaultMoraleTableId = id;
+  }
+  if (src.defaultTraitTableName) {
+    const id = tableNameToId.get(src.defaultTraitTableName) ?? null;
+    if (id) campaignTableUpdates.defaultTraitTableId = id;
+  }
+  if (Object.keys(campaignTableUpdates).length > 0) {
+    await prisma.campaign.update({
+      where: { id: newCampaign.id },
+      data: campaignTableUpdates,
+    });
   }
 
   // ── NPC profiles ───────────────────────────────────────────────────────────
@@ -327,6 +409,29 @@ export async function POST(request: NextRequest) {
         countDirection: f.countDirection ?? null,
         paused: f.paused,
         sortOrder: f.sortOrder,
+      },
+    });
+  }
+
+  // ── Dungeon config ─────────────────────────────────────────────────────────
+  if (src.dungeonConfig) {
+    await prisma.dungeonConfig.create({
+      data: {
+        campaignId: newCampaign.id,
+        turnsPerHour: src.dungeonConfig.turnsPerHour,
+        encounterTurnsJson: src.dungeonConfig.encounterTurnsJson,
+      },
+    });
+  }
+
+  // ── Light source types ─────────────────────────────────────────────────────
+  for (const ls of src.lightSourceTypes) {
+    await prisma.lightSourceType.create({
+      data: {
+        campaignId: newCampaign.id,
+        name: ls.name,
+        defaultDuration: ls.defaultDuration,
+        sortOrder: ls.sortOrder,
       },
     });
   }
