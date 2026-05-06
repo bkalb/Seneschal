@@ -19,12 +19,13 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId } = await requireSession();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const { userId } = await requireSession();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id } = await params;
+    const { id } = await params;
 
-  const campaign = await prisma.campaign.findUnique({
+    const campaign = await prisma.campaign.findUnique({
     where: { id },
     include: {
       state: true,
@@ -45,119 +46,133 @@ export async function GET(
     },
   });
 
-  if (!campaign || campaign.userId !== userId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+    if (!campaign || campaign.userId !== userId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
 
-  // Build id→name map for tables (used for NPC profile step resolution)
-  const tableIdToName = new Map<string, string>(
-    campaign.randomTables.map((t) => [t.id, t.name])
-  );
+    // Build id→name map for tables (used for NPC profile resolution)
+    const tableIdToName = new Map<string, string>(
+      campaign.randomTables.map((t) => [t.id, t.name])
+    );
 
-  // Resolve defaultReactionTableId to a name
-  const defaultReactionTableName = campaign.defaultReactionTableId
-    ? (tableIdToName.get(campaign.defaultReactionTableId) ?? null)
-    : null;
+    // Resolve defaultReactionTableId to a name
+    const defaultReactionTableName = campaign.defaultReactionTableId
+      ? (tableIdToName.get(campaign.defaultReactionTableId) ?? null)
+      : null;
 
-  const exported = {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    campaign: {
-      name: campaign.name,
-      defaultSurpriseDice: campaign.defaultSurpriseDice,
-      defaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
-      defaultReactionTableName,
-      encounterWindowsJson: campaign.encounterWindowsJson,
-      state: {
-        currentDate: campaign.state?.currentDate ?? "0001-01-01",
-      },
-      regions: campaign.regions.map((r) => ({
-        name: r.name,
-        rerollOnSwitch: r.rerollOnSwitch,
-      })),
-      rulesSections: campaign.rulesSections.map((s) => ({
-        title: s.title,
-        content: s.content,
-        sortOrder: s.sortOrder,
-      })),
-      randomTables: campaign.randomTables.map((t) => ({
-        name: t.name,
-        category: t.category,
-        diceExpression: t.diceExpression,
-        isStateful: t.isStateful,
-        rollOnDayAdvance: t.rollOnDayAdvance,
-        seasonName: t.seasonName,
-        rollWhenNoSeason: t.rollWhenNoSeason,
-        manualModifier: t.manualModifier,
-        surpriseDice: t.surpriseDice,
-        surpriseThreshold: t.surpriseThreshold,
-        sortOrder: t.sortOrder,
-        rows: t.rows.map((r) => ({ min: r.min, max: r.max, outcome: r.outcome })),
-        regionNames: t.regions.map((tr) => tr.region.name),
-        modifiers: t.modifiers.map((m) => ({
-          label: m.label,
-          behavior: m.behavior,
-          rollAdjustment: m.rollAdjustment,
-          extraConfig: m.extraConfig,
-          autoRegionNames: m.autoRegions.map((r) => r.name),
-          conditionalRegionNames: m.conditionalRegions.map((r) => r.name),
+    const exported = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      campaign: {
+        name: campaign.name,
+        defaultSurpriseDice: campaign.defaultSurpriseDice,
+        defaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
+        defaultReactionTableName,
+        encounterWindowsJson: campaign.encounterWindowsJson,
+        state: {
+          currentDate: campaign.state?.currentDate ?? "0001-01-01",
+        },
+        regions: campaign.regions.map((r) => ({
+          name: r.name,
+          rerollOnSwitch: r.rerollOnSwitch,
         })),
-      })),
-      npcProfiles: campaign.npcProfiles.map((p) => {
-        const steps: any[] = JSON.parse(p.stepsJson);
-        // Replace tableId with tableName in each step and branch
-        const resolvedSteps = steps.map((step: any) => ({
-          ...step,
-          tableName: step.tableId ? (tableIdToName.get(step.tableId) ?? step.tableId) : "",
-          tableId: undefined,
-          branches: (step.branches ?? []).map((b: any) => ({
-            ...b,
-            tableName: b.tableId ? (tableIdToName.get(b.tableId) ?? b.tableId) : "",
-            tableId: undefined,
+        rulesSections: campaign.rulesSections.map((s) => ({
+          title: s.title,
+          content: s.content,
+          sortOrder: s.sortOrder,
+        })),
+        randomTables: campaign.randomTables.map((t) => ({
+          name: t.name,
+          category: t.category,
+          diceExpression: t.diceExpression,
+          isStateful: t.isStateful,
+          rollOnDayAdvance: t.rollOnDayAdvance,
+          seasonName: t.seasonName,
+          rollWhenNoSeason: t.rollWhenNoSeason,
+          manualModifier: t.manualModifier,
+          surpriseDice: t.surpriseDice,
+          surpriseThreshold: t.surpriseThreshold,
+          sortOrder: t.sortOrder,
+          rows: t.rows.map((r) => ({ min: r.min, max: r.max, outcome: r.outcome })),
+          regionNames: t.regions.map((tr) => tr.region.name),
+          modifiers: t.modifiers.map((m) => ({
+            label: m.label,
+            behavior: m.behavior,
+            rollAdjustment: m.rollAdjustment,
+            extraConfig: m.extraConfig,
+            autoRegionNames: m.autoRegions.map((r) => r.name),
+            conditionalRegionNames: m.conditionalRegions.map((r) => r.name),
           })),
-        }));
-        return {
-          name: p.name,
-          sortOrder: p.sortOrder,
-          steps: resolvedSteps,
-        };
-      }),
-      calendarConfig: campaign.calendarConfig
-        ? {
-            monthsJson: campaign.calendarConfig.monthsJson,
-            weekdaysJson: campaign.calendarConfig.weekdaysJson,
-            seasonsJson: campaign.calendarConfig.seasonsJson,
-            intercalaryJson: campaign.calendarConfig.intercalaryJson,
-            epochDate: campaign.calendarConfig.epochDate,
-            moons: campaign.calendarConfig.moons.map((m) => ({
-              name: m.name,
-              cycleLength: m.cycleLength,
-              referenceNewMoon: m.referenceNewMoon,
+        })),
+        npcProfiles: campaign.npcProfiles.map((p) => {
+          let cfg: any = null;
+          try {
+            const parsed = JSON.parse(p.stepsJson);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) cfg = parsed;
+          } catch { /* ignore */ }
+
+          const idToName = (id: string | null | undefined) =>
+            id ? (tableIdToName.get(id) ?? null) : null;
+
+          return {
+            name: p.name,
+            sortOrder: p.sortOrder,
+            typeLabel: cfg?.typeLabel ?? "Type",
+            secondaryTypeLabel: cfg?.secondaryTypeLabel ?? null,
+            typeTableName: idToName(cfg?.typeTableId),
+            secondaryTypeTableName: idToName(cfg?.secondaryTypeTableId),
+            ageTableName: idToName(cfg?.ageTableId),
+            physicalTableNames: (cfg?.physicalTableIds ?? []).map((id: string) => tableIdToName.get(id) ?? id),
+            personalityTableNames: (cfg?.personalityTableIds ?? []).map((id: string) => tableIdToName.get(id) ?? id),
+            detailTableNames: (cfg?.detailTableIds ?? []).map(({ label, tableId }: { label: string; tableId: string }) => ({
+              label,
+              tableName: tableIdToName.get(tableId) ?? tableId,
             })),
-          }
-        : null,
-      calendarNotes: campaign.calendarNotes.map((n) => ({
-        date: n.date,
-        content: n.content,
-      })),
-      flags: campaign.flags.map((f) => ({
-        label: f.label,
-        color: f.color,
-        counter: f.counter,
-        countDirection: f.countDirection,
-        paused: f.paused,
-        sortOrder: f.sortOrder,
-      })),
-    },
-  };
+          };
+        }),
+        calendarConfig: campaign.calendarConfig
+          ? {
+              monthsJson: campaign.calendarConfig.monthsJson,
+              weekdaysJson: campaign.calendarConfig.weekdaysJson,
+              seasonsJson: campaign.calendarConfig.seasonsJson,
+              intercalaryJson: campaign.calendarConfig.intercalaryJson,
+              epochDate: campaign.calendarConfig.epochDate,
+              moons: campaign.calendarConfig.moons.map((m) => ({
+                name: m.name,
+                cycleLength: m.cycleLength,
+                referenceNewMoon: m.referenceNewMoon,
+              })),
+            }
+          : null,
+        calendarNotes: campaign.calendarNotes.map((n) => ({
+          date: n.date,
+          content: n.content,
+        })),
+        flags: campaign.flags.map((f) => ({
+          label: f.label,
+          color: f.color,
+          counter: f.counter,
+          countDirection: f.countDirection,
+          paused: f.paused,
+          sortOrder: f.sortOrder,
+        })),
+      },
+    };
 
-  const filename = `${campaign.name.replace(/[^a-z0-9]/gi, "_").toLowerCase()}_export.json`;
+    const filename = `${campaign.name.replace(/[^a-z0-9]/gi, "_").toLowerCase()}_export.json`;
 
-  return new NextResponse(JSON.stringify(exported, null, 2), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-    },
-  });
+    return new NextResponse(JSON.stringify(exported, null, 2), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (err) {
+    console.error("[export] error:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 }

@@ -44,25 +44,22 @@ const tableSchema = z.object({
   modifiers: z.array(modifierSchema).default([]),
 });
 
-const branchSchema = z.object({
-  matchText: z.string().default(""),
-  genderFilter: z.enum(["male", "female"]).optional(),
-  tableName: z.string().default(""),
+const detailTableNameSchema = z.object({
   label: z.string(),
-});
-
-const stepSchema = z.object({
-  id: z.string(),
-  type: z.enum(["roll", "gender_branch"]).default("roll"),
-  label: z.string(),
-  tableName: z.string().default(""),
-  branches: z.array(branchSchema).default([]),
+  tableName: z.string(),
 });
 
 const npcProfileSchema = z.object({
   name: z.string(),
   sortOrder: z.number().int().default(0),
-  steps: z.array(stepSchema).default([]),
+  typeLabel: z.string().default("Type"),
+  secondaryTypeLabel: z.string().nullable().default(null),
+  typeTableName: z.string().nullable().optional(),
+  secondaryTypeTableName: z.string().nullable().optional(),
+  ageTableName: z.string().nullable().optional(),
+  physicalTableNames: z.array(z.string()).default([]),
+  personalityTableNames: z.array(z.string()).default([]),
+  detailTableNames: z.array(detailTableNameSchema).default([]),
 });
 
 const moonSchema = z.object({
@@ -252,27 +249,32 @@ export async function POST(request: NextRequest) {
   }
 
   // ── NPC profiles ───────────────────────────────────────────────────────────
+  const nameToId = (name: string | null | undefined): string | null =>
+    name ? (tableNameToId.get(name) ?? null) : null;
+
   for (const p of src.npcProfiles) {
-    // Re-attach tableId from tableName using the new ID map
-    const resolvedSteps = p.steps.map((step) => ({
-      id: step.id,
-      type: step.type,
-      label: step.label,
-      tableId: step.tableName ? (tableNameToId.get(step.tableName) ?? "") : "",
-      branches: step.branches.map((b) => ({
-        matchText: b.matchText,
-        ...(b.genderFilter ? { genderFilter: b.genderFilter } : {}),
-        tableId: b.tableName ? (tableNameToId.get(b.tableName) ?? "") : "",
-        label: b.label,
-      })),
-    }));
+    const config = {
+      typeLabel: p.typeLabel,
+      secondaryTypeLabel: p.secondaryTypeLabel,
+      typeTableId: nameToId(p.typeTableName),
+      secondaryTypeTableId: nameToId(p.secondaryTypeTableName),
+      ageTableId: nameToId(p.ageTableName),
+      physicalTableIds: p.physicalTableNames.map((n) => tableNameToId.get(n)).filter((id): id is string => !!id),
+      personalityTableIds: p.personalityTableNames.map((n) => tableNameToId.get(n)).filter((id): id is string => !!id),
+      detailTableIds: p.detailTableNames
+        .map(({ label, tableName }) => {
+          const id = tableNameToId.get(tableName);
+          return id ? { label, tableId: id } : null;
+        })
+        .filter((d): d is { label: string; tableId: string } => d !== null),
+    };
 
     await prisma.npcProfile.create({
       data: {
         campaignId: newCampaign.id,
         name: p.name,
         sortOrder: p.sortOrder,
-        stepsJson: JSON.stringify(resolvedSteps),
+        stepsJson: JSON.stringify(config),
       },
     });
   }

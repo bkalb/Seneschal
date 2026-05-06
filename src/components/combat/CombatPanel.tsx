@@ -1,6 +1,25 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { GripVertical, Shield, Sword } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableCard } from "@/components/tables/TableCard";
@@ -61,6 +80,34 @@ function combatantColor(currentHp: number, maxHp: number): string {
 
 // ─── Combatant row ────────────────────────────────────────────────────────────
 
+function ShieldAc({ ac }: { ac: number }) {
+  return (
+    <span className="relative inline-flex items-center justify-center shrink-0" aria-label={`AC ${ac}`}>
+      <Shield className="h-5 w-5 text-muted-foreground" />
+      <span className="absolute text-[10px] font-bold leading-none text-muted-foreground" style={{ marginTop: "-1px" }}>
+        {ac}
+      </span>
+    </span>
+  );
+}
+
+function AttackPips({ count }: { count: number }) {
+  if (count <= 5) {
+    return (
+      <span className="inline-flex items-center gap-px shrink-0" aria-label={`${count} attack${count !== 1 ? "s" : ""}`}>
+        {Array.from({ length: count }, (_, i) => (
+          <Sword key={i} className="h-3 w-3 text-muted-foreground" />
+        ))}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-0.5 shrink-0 text-xs text-muted-foreground tabular-nums" aria-label={`${count} attacks`}>
+      {count}<Sword className="h-3 w-3" />
+    </span>
+  );
+}
+
 function CombatantRow({
   combatant,
   campaignId,
@@ -75,6 +122,7 @@ function CombatantRow({
     ac: String(combatant.ac),
     hd: combatant.hd,
     maxHp: String(combatant.maxHp),
+    attackCount: String(combatant.attackCount),
     attackBonus: String(combatant.attackBonus),
     attackDamage: combatant.attackDamage,
   });
@@ -83,7 +131,6 @@ function CombatantRow({
   const del = useDeleteCombatant(campaignId);
 
   const nameColor = combatantColor(combatant.currentHp, combatant.maxHp);
-  const tooltip = `AC ${combatant.ac}, HD ${combatant.hd}, Atk ${combatant.attackBonus >= 0 ? "+" : ""}${combatant.attackBonus}, Dmg ${combatant.attackDamage}`;
 
   function applyHp(newHp: number) {
     patch.mutate({ id: combatant.id, currentHp: newHp });
@@ -115,6 +162,7 @@ function CombatantRow({
   function saveEdit() {
     const ac = parseInt(editForm.ac, 10);
     const maxHp = parseInt(editForm.maxHp, 10);
+    const attackCount = Math.max(1, parseInt(editForm.attackCount, 10) || 1);
     const attackBonus = parseInt(editForm.attackBonus, 10);
     if (isNaN(ac) || isNaN(maxHp) || isNaN(attackBonus)) return;
     patch.mutate({
@@ -123,6 +171,7 @@ function CombatantRow({
       ac,
       hd: editForm.hd,
       maxHp,
+      attackCount,
       attackBonus,
       attackDamage: editForm.attackDamage,
     });
@@ -181,6 +230,16 @@ function CombatantRow({
             />
           </div>
           <div>
+            <label className="text-muted-foreground">Attacks</label>
+            <Input
+              type="number"
+              min={1}
+              value={editForm.attackCount}
+              onChange={(e) => setEditForm((f) => ({ ...f, attackCount: e.target.value }))}
+              className="h-6 text-xs mt-0.5"
+            />
+          </div>
+          <div>
             <label className="text-muted-foreground">Atk Bonus</label>
             <Input
               value={editForm.attackBonus}
@@ -188,7 +247,7 @@ function CombatantRow({
               className="h-6 text-xs mt-0.5"
             />
           </div>
-          <div className="col-span-2">
+          <div>
             <label className="text-muted-foreground">Damage</label>
             <Input
               value={editForm.attackDamage}
@@ -208,11 +267,18 @@ function CombatantRow({
 
   return (
     <div className="flex items-center gap-2 py-0.5 group">
-      <span className={`flex-1 text-sm truncate ${nameColor}`} title={tooltip}>
+      <span
+        className={`flex-1 text-sm truncate ${nameColor}`}
+        title={combatant.notes ?? undefined}
+      >
         {combatant.name}
-        {combatant.notes && (
-          <span className="text-muted-foreground font-normal"> ({combatant.notes})</span>
-        )}
+      </span>
+      <span className="inline-flex items-center gap-1.5 shrink-0">
+        <ShieldAc ac={combatant.ac} />
+        <AttackPips count={combatant.attackCount} />
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {combatant.attackBonus >= 0 ? "+" : ""}{combatant.attackBonus}/{combatant.attackDamage}
+        </span>
       </span>
       <div className="flex items-center gap-1 shrink-0">
         <button
@@ -273,6 +339,7 @@ function SideCard({
     hd: campaignDefaults.defaultCombatHD ?? "1d8",
     maxHp: "",
     rollIndividually: campaignDefaults.defaultRollHpIndividually,
+    attackCount: "1",
     attackBonus: String(campaignDefaults.defaultCombatAttackBonus ?? 0),
     attackDamage: campaignDefaults.defaultCombatAttackDamage ?? "1d6",
   });
@@ -291,6 +358,7 @@ function SideCard({
 
   function submitAdd() {
     const ac = parseInt(addForm.ac, 10);
+    const attackCount = Math.max(1, parseInt(addForm.attackCount, 10) || 1);
     const attackBonus = parseInt(addForm.attackBonus, 10);
     if (!addForm.name || isNaN(ac) || isNaN(attackBonus)) return;
     if (!addForm.rollIndividually && !addForm.maxHp) return;
@@ -304,6 +372,7 @@ function SideCard({
         ac,
         hd: addForm.hd,
         maxHps,
+        attackCount,
         attackBonus,
         attackDamage: addForm.attackDamage,
       });
@@ -317,6 +386,7 @@ function SideCard({
         ac,
         hd: addForm.hd,
         maxHp,
+        attackCount,
         attackBonus,
         attackDamage: addForm.attackDamage,
       });
@@ -524,6 +594,7 @@ function AddSideForm({
     hd: campaignDefaults.defaultCombatHD ?? "1d8",
     maxHp: "",
     rollIndividually: campaignDefaults.defaultRollHpIndividually,
+    attackCount: "1",
     attackBonus: String(campaignDefaults.defaultCombatAttackBonus ?? 0),
     attackDamage: campaignDefaults.defaultCombatAttackDamage ?? "1d6",
     useTraits: false,
@@ -556,6 +627,7 @@ function AddSideForm({
 
   function submit() {
     const ac = parseInt(form.ac, 10);
+    const attackCount = Math.max(1, parseInt(form.attackCount, 10) || 1);
     const attackBonus = parseInt(form.attackBonus, 10);
     if (!form.name || isNaN(ac) || isNaN(attackBonus)) return;
     if (!form.rollIndividually && !form.maxHp) return;
@@ -567,11 +639,11 @@ function AddSideForm({
 
     if (form.rollIndividually) {
       const maxHps = Array.from({ length: count }, () => rollHd(form.hd));
-      addSide.mutate({ encounterId, name: form.name, count, ac, hd: form.hd, maxHps, attackBonus, attackDamage: form.attackDamage, traitTableId, traitCount });
+      addSide.mutate({ encounterId, name: form.name, count, ac, hd: form.hd, maxHps, attackCount, attackBonus, attackDamage: form.attackDamage, traitTableId, traitCount });
     } else {
       const maxHp = parseInt(form.maxHp, 10);
       if (isNaN(maxHp)) return;
-      addSide.mutate({ encounterId, name: form.name, count, ac, hd: form.hd, maxHp, attackBonus, attackDamage: form.attackDamage, traitTableId, traitCount });
+      addSide.mutate({ encounterId, name: form.name, count, ac, hd: form.hd, maxHp, attackCount, attackBonus, attackDamage: form.attackDamage, traitTableId, traitCount });
     }
     onClose();
   }
@@ -731,6 +803,30 @@ function AddSideForm({
 
 // ─── Round Tracker ────────────────────────────────────────────────────────────
 
+function SortableSideRow({ id, name }: { id: string; name: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={[
+        "flex items-center gap-1.5",
+        isDragging ? "opacity-75" : "",
+      ].join(" ")}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground p-0.5 rounded touch-none"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <span className="text-sm">{name}</span>
+    </div>
+  );
+}
+
 function RoundTracker({
   encounter,
   campaignId,
@@ -772,12 +868,17 @@ function RoundTracker({
   const orderedSides = [...sides].sort((a, b) => a.sortOrder - b.sortOrder);
   const allActed = orderedSides.every((s) => s.actedThisRound);
 
-  function moveSide(index: number, direction: -1 | 1) {
-    const next = [...draftOrder];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setDraftOrder(next);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = draftOrder.indexOf(active.id as string);
+    const newIndex = draftOrder.indexOf(over.id as string);
+    setDraftOrder(arrayMove(draftOrder, oldIndex, newIndex));
   }
 
   async function beginRound() {
@@ -805,31 +906,20 @@ function RoundTracker({
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Round {encounter.currentRound} — Set Initiative Order
         </p>
-        <div className="space-y-1">
-          {draftSides.map((side, idx) => (
-            <div key={side.id} className="flex items-center gap-1.5">
-              <div className="flex flex-col gap-0.5">
-                <button
-                  onClick={() => moveSide(idx, -1)}
-                  disabled={idx === 0}
-                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 leading-none"
-                  aria-label="Move up"
-                >
-                  ▲
-                </button>
-                <button
-                  onClick={() => moveSide(idx, 1)}
-                  disabled={idx === draftSides.length - 1}
-                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 leading-none"
-                  aria-label="Move down"
-                >
-                  ▼
-                </button>
-              </div>
-              <span className="text-sm">{side.name}</span>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={draftOrder} strategy={verticalListSortingStrategy}>
+            <div className="space-y-1">
+              {draftSides.map((side) => (
+                <SortableSideRow key={side.id} id={side.id} name={side.name} />
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
         <div className="flex justify-end">
           <Button size="xs" onClick={beginRound} disabled={patchSide.isPending}>
             Begin Round {encounter.currentRound}

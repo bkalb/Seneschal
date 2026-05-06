@@ -9,6 +9,7 @@ const patchSchema = z.object({
   maxHp: z.number().int().min(1).optional(),
   ac: z.number().int().optional(),
   hd: z.string().min(1).optional(),
+  attackCount: z.number().int().min(1).optional(),
   attackBonus: z.number().int().optional(),
   attackDamage: z.string().min(1).optional(),
 });
@@ -43,6 +44,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       ...(d.maxHp !== undefined && { maxHp: d.maxHp }),
       ...(d.ac !== undefined && { ac: d.ac }),
       ...(d.hd !== undefined && { hd: d.hd }),
+      ...(d.attackCount !== undefined && { attackCount: d.attackCount }),
       ...(d.attackBonus !== undefined && { attackBonus: d.attackBonus }),
       ...(d.attackDamage !== undefined && { attackDamage: d.attackDamage }),
     },

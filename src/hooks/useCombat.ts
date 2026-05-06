@@ -11,6 +11,7 @@ export interface CombatCombatantData {
   hd: string;
   maxHp: number;
   currentHp: number;
+  attackCount: number;
   attackBonus: number;
   attackDamage: string;
   notes: string | null;
@@ -46,6 +47,7 @@ export interface AddSidePayload {
   hd: string;
   maxHp?: number;
   maxHps?: number[];
+  attackCount?: number;
   attackBonus: number;
   attackDamage: string;
   traitTableId?: string;
@@ -60,6 +62,7 @@ export interface AddCombatantPayload {
   hd: string;
   maxHp?: number;
   maxHps?: number[];
+  attackCount?: number;
   attackBonus: number;
   attackDamage: string;
 }
@@ -71,6 +74,7 @@ export interface PatchCombatantPayload {
   maxHp?: number;
   ac?: number;
   hd?: string;
+  attackCount?: number;
   attackBonus?: number;
   attackDamage?: string;
 }
@@ -164,7 +168,18 @@ export function usePatchCombatant(campaignId: string) {
       if (!res.ok) throw new Error("Failed to update combatant");
       return res.json();
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["combat-encounter", campaignId] }),
+    onSuccess: (updated) => {
+      qc.setQueryData(["combat-encounter", campaignId], (old: CombatEncounterData | null | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          sides: old.sides.map((side) => ({
+            ...side,
+            combatants: side.combatants.map((c) => (c.id === updated.id ? updated : c)),
+          })),
+        };
+      });
+    },
   });
 }
 

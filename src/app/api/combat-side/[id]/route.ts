@@ -16,6 +16,7 @@ const addCombatantSchema = z.object({
   hd: z.string().min(1),
   maxHp: z.number().int().min(1).optional(),
   maxHps: z.array(z.number().int().min(1)).optional(),
+  attackCount: z.number().int().min(1).default(1),
   attackBonus: z.number().int(),
   attackDamage: z.string().min(1),
 }).refine((d) => d.maxHp != null || (d.maxHps != null && d.maxHps.length > 0), {
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const parsed = addCombatantSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { name, count, ac, hd, maxHp, maxHps, attackBonus, attackDamage } = parsed.data;
+  const { name, count, ac, hd, maxHp, maxHps, attackCount, attackBonus, attackDamage } = parsed.data;
   const existingCount = await prisma.combatCombatant.count({ where: { sideId: id } });
 
   if (count === 1) {
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         hd,
         maxHp: hp,
         currentHp: hp,
+        attackCount,
         attackBonus,
         attackDamage,
       },
@@ -97,6 +99,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         hd,
         maxHp: hp,
         currentHp: hp,
+        attackCount,
         attackBonus,
         attackDamage,
       };

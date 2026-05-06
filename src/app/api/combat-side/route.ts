@@ -15,6 +15,7 @@ const createSchema = z.object({
   maxHp: z.number().int().min(1).optional(),
   // Per-combatant rolled HP values; when provided, takes precedence over maxHp.
   maxHps: z.array(z.number().int().min(1)).optional(),
+  attackCount: z.number().int().min(1).default(1),
   attackBonus: z.number().int(),
   attackDamage: z.string().min(1),
   // Optional humanoid trait rolling
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { encounterId, name, count, ac, hd, maxHp, maxHps, attackBonus, attackDamage, traitTableId, traitCount } = parsed.data;
+  const { encounterId, name, count, ac, hd, maxHp, maxHps, attackCount, attackBonus, attackDamage, traitTableId, traitCount } = parsed.data;
 
   const encounter = await prisma.combatEncounter.findUnique({
     where: { id: encounterId },
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
             hd,
             maxHp: hp,
             currentHp: hp,
+            attackCount,
             attackBonus,
             attackDamage,
             notes,

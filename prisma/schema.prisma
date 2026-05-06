@@ -488,6 +488,7 @@ model CombatCombatant {
   hd            String     @default("1d8")
   maxHp         Int        @default(8)
   currentHp     Int        @default(8)
+  attackCount   Int        @default(1)
   attackBonus   Int        @default(0)
   attackDamage  String     @default("1d6")
   notes         String?
