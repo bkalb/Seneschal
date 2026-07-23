@@ -40,18 +40,25 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
 
   const sorted = flags.slice().sort((a, b) => a.sortOrder - b.sortOrder);
 
-  function moveFlag(flag: CampaignFlag, dir: -1 | 1) {
+  async function moveFlag(flag: CampaignFlag, dir: -1 | 1) {
     const idx = sorted.findIndex((f) => f.id === flag.id);
     const neighbor = sorted[idx + dir];
     if (!neighbor) return;
-    // Swap sort orders
+    // Swap sort orders sequentially to avoid racing, interleaved invalidations
+    try {
+      await updateMutation.mutateAsync({ id: flag.id, sortOrder: neighbor.sortOrder });
+      await updateMutation.mutateAsync({ id: neighbor.id, sortOrder: flag.sortOrder });
+    } catch {
+      toast.error("Failed to reorder flag");
+    }
+  }
+
+  function adjustCounter(flag: CampaignFlag, delta: 1 | -1) {
+    if (flag.counter === null) return;
+    const newValue = Math.max(0, flag.counter + delta);
     updateMutation.mutate(
-      { id: flag.id, sortOrder: neighbor.sortOrder },
-      { onError: () => toast.error("Failed to reorder flag") }
-    );
-    updateMutation.mutate(
-      { id: neighbor.id, sortOrder: flag.sortOrder },
-      { onError: () => toast.error("Failed to reorder flag") }
+      { id: flag.id, counter: newValue },
+      { onError: () => toast.error("Failed to update flag") }
     );
   }
 
@@ -68,6 +75,8 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
             onDelete={() => deleteMutation.mutate(flag.id, { onError: () => toast.error("Failed to delete flag") })}
             onMoveLeft={() => moveFlag(flag, -1)}
             onMoveRight={() => moveFlag(flag, 1)}
+            onIncrement={() => adjustCounter(flag, 1)}
+            onDecrement={() => adjustCounter(flag, -1)}
           />
         ))}
 
@@ -135,9 +144,11 @@ interface ChipProps {
   onDelete: () => void;
   onMoveLeft: () => void;
   onMoveRight: () => void;
+  onIncrement: () => void;
+  onDecrement: () => void;
 }
 
-function FlagChip({ flag, isFirst, isLast, onEdit, onDelete, onMoveLeft, onMoveRight }: ChipProps) {
+function FlagChip({ flag, isFirst, isLast, onEdit, onDelete, onMoveLeft, onMoveRight, onIncrement, onDecrement }: ChipProps) {
   const atZero = flag.countDirection === "down" && flag.counter === 0;
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -167,6 +178,15 @@ function FlagChip({ flag, isFirst, isLast, onEdit, onDelete, onMoveLeft, onMoveR
 
       {flag.counter !== null && (
         <span className="flex items-center gap-0.5">
+          <button
+            onClick={onDecrement}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-black/10"
+            title="Decrement counter"
+          >
+            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14" />
+            </svg>
+          </button>
           {flag.countDirection === "up" ? (
             <svg className="w-2.5 h-2.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
@@ -177,6 +197,15 @@ function FlagChip({ flag, isFirst, isLast, onEdit, onDelete, onMoveLeft, onMoveR
             </svg>
           )}
           <span className={atZero ? "font-bold" : ""}>{flag.counter}</span>
+          <button
+            onClick={onIncrement}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-black/10"
+            title="Increment counter"
+          >
+            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
           {flag.paused && <span className="opacity-50">⏸</span>}
         </span>
       )}
