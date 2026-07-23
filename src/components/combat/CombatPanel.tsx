@@ -332,6 +332,7 @@ function SideCard({
   const [showAddForm, setShowAddForm] = useState(false);
   const [showNpcPicker, setShowNpcPicker] = useState(false);
   const [renamingName, setRenamingName] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const patchSide = usePatchCombatSide(campaignId);
   const [addForm, setAddForm] = useState({
     name: "",
@@ -439,15 +440,39 @@ function SideCard({
             {side.name}
           </button>
         )}
-        <button
-          onClick={() => { if (window.confirm(`Remove "${side.name}" and all its combatants?`)) deleteSide.mutate(side.id); }}
-          className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
-          title="Remove side"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {confirmDelete ? (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-xs text-muted-foreground">Remove side?</span>
+            <button
+              onClick={() => deleteSide.mutate(side.id)}
+              className="p-0.5 rounded text-destructive hover:bg-muted transition-colors"
+              title="Confirm remove"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Cancel"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
+            title="Remove side"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <div className="space-y-0.5">

@@ -23,6 +23,7 @@ import { TableImportWizard } from "@/components/tables/TableImportWizard";
 import { TableManagerModal } from "@/components/tables/TableManagerModal";
 import { MoonPhaseIcon } from "./MoonPhaseIcon";
 import RichTextEditor from "@/components/ui/RichTextEditor";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   parseDate,
   formatDate,
@@ -739,8 +740,8 @@ function DayDetailSheet({ campaignId, date, currentDate, config, notes, onClose,
   const isSavePending = createMutation.isPending || updateMutation.isPending;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
-      <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg sm:max-w-lg max-h-[85vh] flex flex-col gap-0 p-0">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
             <p className="font-semibold text-sm">
@@ -757,11 +758,6 @@ function DayDetailSheet({ campaignId, date, currentDate, config, notes, onClose,
               </button>
             )}
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0 ml-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           <RichTextEditor
@@ -813,7 +809,7 @@ function DayDetailSheet({ campaignId, date, currentDate, config, notes, onClose,
             {isSavePending ? "Saving…" : "Save note"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
