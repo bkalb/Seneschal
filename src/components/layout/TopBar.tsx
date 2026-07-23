@@ -65,7 +65,7 @@ export default function TopBar({
   }, []);
 
   return (
-    <header className="sticky top-0 z-40 flex items-center gap-3 border-b bg-background/95 backdrop-blur px-4 py-2 h-14">
+    <header className="sticky top-0 z-40 flex items-center gap-2 sm:gap-3 border-b bg-background/95 backdrop-blur px-2 sm:px-4 py-2 h-14">
       <div className="flex items-center gap-2 shrink-0">
         <Image
           src="/logo.png"
@@ -79,7 +79,9 @@ export default function TopBar({
         </span>
       </div>
       <div className="h-4 w-px bg-border hidden sm:block" />
-      <CampaignSwitcher currentCampaign={campaign} allCampaigns={allCampaigns} />
+      <div className="min-w-0 shrink">
+        <CampaignSwitcher currentCampaign={campaign} allCampaigns={allCampaigns} />
+      </div>
 
       {/* Mode toggle */}
       <div data-slot="button-group" className="flex rounded-md border border-border overflow-hidden shrink-0">
@@ -88,28 +90,34 @@ export default function TopBar({
           variant={mode === "OVERLAND" ? "default" : "ghost"}
           onClick={() => onModeChange("OVERLAND")}
           title="Overland exploration mode"
+          aria-label="Overland exploration mode"
         >
-          Overland
+          <span className="hidden sm:inline">Overland</span>
+          <span className="sm:hidden">O</span>
         </Button>
         <Button
           size="xs"
           variant={mode === "DUNGEON" ? "default" : "ghost"}
           onClick={() => onModeChange("DUNGEON")}
           title="Dungeon exploration mode"
+          aria-label="Dungeon exploration mode"
         >
-          Dungeon
+          <span className="hidden sm:inline">Dungeon</span>
+          <span className="sm:hidden">D</span>
         </Button>
         <Button
           size="xs"
           variant={mode === "COMBAT" ? "default" : "ghost"}
           onClick={() => onModeChange("COMBAT")}
           title="Combat encounter mode"
+          aria-label="Combat encounter mode"
         >
-          Combat
+          <span className="hidden sm:inline">Combat</span>
+          <span className="sm:hidden">C</span>
         </Button>
       </div>
 
-      <div className="flex-1" />
+      <div className="flex-1 min-w-0" />
 
       <Button
         size="xs"
@@ -137,15 +145,19 @@ export default function TopBar({
 
       {/* Dungeon location picker — only in dungeon mode */}
       {mode === "DUNGEON" && (
-        <DungeonRegionSelector
-          campaign={campaign}
-          currentDungeonRegionId={currentDungeonRegionId}
-          onDungeonRegionChange={onDungeonRegionChange}
-        />
+        <div className="min-w-0 shrink">
+          <DungeonRegionSelector
+            campaign={campaign}
+            currentDungeonRegionId={currentDungeonRegionId}
+            onDungeonRegionChange={onDungeonRegionChange}
+          />
+        </div>
       )}
 
       {/* Overland region selector — always visible */}
-      <RegionSelector campaign={campaign} onRegionChange={onRegionChange} />
+      <div className="min-w-0 shrink">
+        <RegionSelector campaign={campaign} onRegionChange={onRegionChange} />
+      </div>
     </header>
   );
 }
