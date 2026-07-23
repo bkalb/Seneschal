@@ -21,10 +21,14 @@ interface Props {
 export function TableManagerModal({ title, tables, campaignId, regions, seasons, onClose }: Props) {
   const [editingTable, setEditingTable] = useState<RandomTable | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const deleteMutation = useDeleteTable(campaignId);
   const updateMutation = useUpdateTable(campaignId);
-  const sorted = tables.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = tables
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .filter((t) => t.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   function setMode(table: RandomTable, mode: "BOTH" | "OVERLAND" | "DUNGEON") {
     updateMutation.mutate({ id: table.id, applicableModes: mode });
@@ -56,9 +60,20 @@ export function TableManagerModal({ title, tables, campaignId, regions, seasons,
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search tables…"
+          className="mt-3 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          aria-label="Search tables"
+        />
+
         <div className="flex-1 overflow-y-auto divide-y divide-border -mx-4 min-h-0">
           {sorted.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-10">No tables yet.</p>
+            <p className="text-sm text-muted-foreground text-center py-10">
+              {tables.length === 0 ? "No tables yet." : "No tables match your search."}
+            </p>
           ) : (
             sorted.map((table) => {
               const mode = (table.applicableModes ?? "BOTH") as "BOTH" | "OVERLAND" | "DUNGEON";

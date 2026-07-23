@@ -9,6 +9,7 @@ import { ModifierToggleBar } from "./ModifierToggleBar";
 import { TableImportWizard } from "./TableImportWizard";
 import { TableManagerModal } from "./TableManagerModal";
 import { TableCard } from "./TableCard";
+import { Combobox } from "@/components/ui/Combobox";
 import type { EncounterWindow } from "@/lib/encounter-timing";
 import { rollEncounterTime } from "@/lib/encounter-timing";
 
@@ -174,22 +175,19 @@ export function TablesPanel({ campaignId, category, currentRegionId, regions, ti
         </div>
       ) : (
         <div className="flex items-center gap-1.5">
-          <select
-            value={selectedTableId ?? ""}
-            onChange={(e) => {
-              setSelectedTableId(e.target.value);
+          <Combobox
+            items={sorted.map((t) => ({ id: t.id, label: t.name }))}
+            value={selectedTableId}
+            onChange={(id) => {
+              setSelectedTableId(id);
               setLastResult(null);
               setActiveToggles([]);
               setLastEncounterTime(null);
               setTimingMode("none");
               setSelectedWindowIdx(-1);
             }}
-            className="flex-1 min-w-0 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {sorted.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
+            className="flex-1 min-w-0"
+          />
           <button
             onClick={handleRoll}
             disabled={!selectedTable || rollMutation.isPending}
