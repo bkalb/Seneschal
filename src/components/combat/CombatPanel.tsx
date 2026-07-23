@@ -22,6 +22,7 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { GripVertical, Shield, Sword } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TableCard } from "@/components/tables/TableCard";
 import { TableImportWizard } from "@/components/tables/TableImportWizard";
 import { useRandomTables } from "@/hooks/useRandomTables";
@@ -1066,8 +1067,10 @@ export function CombatPanel({ campaignId, campaignDefaults, regions, currentRegi
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-border bg-card p-4">
-        <p className="text-xs text-muted-foreground">Loading combat…</p>
+      <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
       </div>
     );
   }

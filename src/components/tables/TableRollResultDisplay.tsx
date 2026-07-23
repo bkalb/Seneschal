@@ -47,6 +47,9 @@ export function TableRollResultDisplay({ result, tableRows, onSendToCombat }: Pr
         <div className="font-medium text-foreground leading-snug">
           {resolvedOutcome.expandedText}
         </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          {resolvedOutcome.expandedText}
+        </span>
         {combatInfo && (
           <button
             onClick={() => onSendToCombat!(combatInfo.name, combatInfo.count)}

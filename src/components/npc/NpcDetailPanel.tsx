@@ -421,7 +421,7 @@ export function NpcDetailPanel({ npc, affiliations, campaignId, onClose, onDelet
             className={[
               "flex items-center gap-1.5 px-3 py-1.5 rounded text-xs transition-colors",
               npc.isDeceased
-                ? "bg-muted text-muted-foreground hover:text-foreground"
+                ? "bg-red-500/10 text-red-600 hover:text-red-700"
                 : "bg-muted text-muted-foreground hover:text-foreground",
             ].join(" ")}
             aria-label={npc.isDeceased ? "Mark NPC as alive" : "Mark NPC as deceased"}
