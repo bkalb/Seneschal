@@ -143,20 +143,20 @@ export async function POST(request: NextRequest) {
     if (!forecastingMode) {
       const needsPersist = raw.isStateful || raw.modifiers.some((m: any) => m.behavior === "PREV_RESULT_CONDITION");
       if (needsPersist) {
-        prisma.randomTable.update({
+        await prisma.randomTable.update({
           where: { id: raw.id },
           data: { lastResult: rawDice, lastModifiedResult: diceTotal },
-        }).catch(() => {});
+        });
       }
     }
   }
 
   // Persist today's weather rolls so they can be restored on page reload
   if (weatherRolls.length > 0) {
-    prisma.campaignState.update({
+    await prisma.campaignState.update({
       where: { campaignId },
       data: { todayWeatherJson: JSON.stringify(weatherRolls) },
-    }).catch(() => {});
+    });
   }
 
   // ── Pass 2: tomorrow's forecast (forecasting mode only) ───────────────────────
@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
         // and if it rolled today, persist its lastResult.
         const todayResult = todayById.get(raw.id);
         if (todayResult) {
-          prisma.randomTable.update({
+          await prisma.randomTable.update({
             where: { id: raw.id },
             data: {
               lastResult: todayResult.rawDice,
@@ -181,7 +181,7 @@ export async function POST(request: NextRequest) {
               forecastDate: null,
               forecastOutcome: null,
             },
-          }).catch(() => {});
+          });
         }
         continue;
       }
@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
       });
 
       const todayResult = todayById.get(raw.id);
-      prisma.randomTable.update({
+      await prisma.randomTable.update({
         where: { id: raw.id },
         data: {
           // Persist today's result for tables that rolled today; leave unchanged for others
@@ -216,7 +216,7 @@ export async function POST(request: NextRequest) {
           forecastDate: tomorrowDateStr,
           forecastOutcome: tomorrowResult.resolvedOutcome.expandedText,
         },
-      }).catch(() => {});
+      });
     }
   }
 
@@ -307,7 +307,7 @@ export async function POST(request: NextRequest) {
       flag.countDirection === "up"
         ? (flag.counter ?? 0) + 1
         : Math.max(0, (flag.counter ?? 0) - 1);
-    prisma.campaignFlag.update({ where: { id: flag.id }, data: { counter: newCounter } }).catch(() => {});
+    await prisma.campaignFlag.update({ where: { id: flag.id }, data: { counter: newCounter } });
   }
 
   return NextResponse.json({

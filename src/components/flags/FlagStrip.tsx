@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { useFlags, useCreateFlag, useUpdateFlag, useDeleteFlag, type CampaignFlag } from "@/hooks/useFlags";
 import { FlagEditModal } from "./FlagEditModal";
 
@@ -44,8 +45,14 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
     const neighbor = sorted[idx + dir];
     if (!neighbor) return;
     // Swap sort orders
-    updateMutation.mutate({ id: flag.id, sortOrder: neighbor.sortOrder });
-    updateMutation.mutate({ id: neighbor.id, sortOrder: flag.sortOrder });
+    updateMutation.mutate(
+      { id: flag.id, sortOrder: neighbor.sortOrder },
+      { onError: () => toast.error("Failed to reorder flag") }
+    );
+    updateMutation.mutate(
+      { id: neighbor.id, sortOrder: flag.sortOrder },
+      { onError: () => toast.error("Failed to reorder flag") }
+    );
   }
 
   return (
@@ -58,7 +65,7 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
             isFirst={idx === 0}
             isLast={idx === sorted.length - 1}
             onEdit={() => setEditingFlag(flag)}
-            onDelete={() => deleteMutation.mutate(flag.id)}
+            onDelete={() => deleteMutation.mutate(flag.id, { onError: () => toast.error("Failed to delete flag") })}
             onMoveLeft={() => moveFlag(flag, -1)}
             onMoveRight={() => moveFlag(flag, 1)}
           />
@@ -81,12 +88,20 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
         <FlagEditModal
           flag={editingFlag}
           onSave={async (data) => {
-            await updateMutation.mutateAsync({ id: editingFlag.id, ...data });
-            setEditingFlag(null);
+            try {
+              await updateMutation.mutateAsync({ id: editingFlag.id, ...data });
+              setEditingFlag(null);
+            } catch {
+              toast.error("Failed to update flag");
+            }
           }}
           onDelete={async () => {
-            await deleteMutation.mutateAsync(editingFlag.id);
-            setEditingFlag(null);
+            try {
+              await deleteMutation.mutateAsync(editingFlag.id);
+              setEditingFlag(null);
+            } catch {
+              toast.error("Failed to delete flag");
+            }
           }}
           onClose={() => setEditingFlag(null)}
         />
@@ -96,8 +111,12 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
       {showNew && (
         <FlagEditModal
           onSave={async (data) => {
-            await createMutation.mutateAsync(data as any);
-            setShowNew(false);
+            try {
+              await createMutation.mutateAsync(data as any);
+              setShowNew(false);
+            } catch {
+              toast.error("Failed to create flag");
+            }
           }}
           onClose={() => setShowNew(false)}
         />

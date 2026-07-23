@@ -1,6 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import { useTheme } from "next-themes";
+import { Sun, Moon, History } from "lucide-react";
 import CampaignSwitcher from "./CampaignSwitcher";
 import RegionSelector from "./RegionSelector";
 import DungeonRegionSelector from "./DungeonRegionSelector";
@@ -41,6 +44,7 @@ interface TopBarProps {
   onRegionChange: (regionId: string | null) => void;
   currentDungeonRegionId: string | null;
   onDungeonRegionChange: (regionId: string | null) => void;
+  onOpenHistory: () => void;
 }
 
 export default function TopBar({
@@ -51,7 +55,15 @@ export default function TopBar({
   onRegionChange,
   currentDungeonRegionId,
   onDungeonRegionChange,
+  onOpenHistory,
 }: TopBarProps) {
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <header className="sticky top-0 z-40 flex items-center gap-3 border-b bg-background/95 backdrop-blur px-4 py-2 h-14">
       <div className="flex items-center gap-2 shrink-0">
@@ -98,6 +110,30 @@ export default function TopBar({
       </div>
 
       <div className="flex-1" />
+
+      <Button
+        size="xs"
+        variant="ghost"
+        onClick={onOpenHistory}
+        title="Roll history"
+        aria-label="Roll history"
+      >
+        <History className="h-4 w-4" />
+      </Button>
+
+      <Button
+        size="xs"
+        variant="ghost"
+        onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+        title="Toggle dark mode"
+        aria-label="Toggle dark mode"
+      >
+        {mounted && resolvedTheme === "dark" ? (
+          <Sun className="h-4 w-4" />
+        ) : (
+          <Moon className="h-4 w-4" />
+        )}
+      </Button>
 
       {/* Dungeon location picker — only in dungeon mode */}
       {mode === "DUNGEON" && (

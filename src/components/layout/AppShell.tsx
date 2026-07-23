@@ -9,6 +9,7 @@ import { CalendarPanel } from "@/components/calendar/CalendarPanel";
 import { DungeonPanel } from "@/components/dungeon/DungeonPanel";
 import { CombatPanel } from "@/components/combat/CombatPanel";
 import { FlagStrip } from "@/components/flags/FlagStrip";
+import { RollHistoryPanel } from "@/components/history/RollHistoryPanel";
 import type { CampaignFlag } from "@/hooks/useFlags";
 import { parseEncounterWindows } from "@/lib/encounter-timing";
 import type { TableRollResult } from "@/types/table";
@@ -72,6 +73,7 @@ interface AppShellProps {
 
 export default function AppShell({ campaign, allCampaigns, initialFlags }: AppShellProps) {
   const [rulesCollapsed, setRulesCollapsed] = useState(false);
+  const [filterRulesByMode, setFilterRulesByMode] = useState(true);
   const [currentRegionId, setCurrentRegionId] = useState<string | null>(
     campaign.state?.currentRegionId ?? null
   );
@@ -86,6 +88,7 @@ export default function AppShell({ campaign, allCampaigns, initialFlags }: AppSh
   );
   const [encounterTableOverrideId, setEncounterTableOverrideId] = useState<string | null>(null);
   const [combatPrefill, setCombatPrefill] = useState<{ name: string; count: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const [overlandEncounter, setOverlandEncounter] = useState<EncounterPersistedState>(EMPTY_ENCOUNTER);
   const [dungeonEncounter, setDungeonEncounter] = useState<EncounterPersistedState>(EMPTY_ENCOUNTER);
@@ -143,25 +146,47 @@ export default function AppShell({ campaign, allCampaigns, initialFlags }: AppSh
         onRegionChange={setCurrentRegionId}
         currentDungeonRegionId={currentDungeonRegionId}
         onDungeonRegionChange={handleDungeonRegionChange}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
+      <RollHistoryPanel
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        campaignId={campaign.id}
+        currentRegionId={mode === "DUNGEON" ? currentDungeonRegionId : currentRegionId}
       />
       <FlagStrip campaignId={campaign.id} initialFlags={initialFlags} />
       <main className="flex-1 grid grid-cols-1 md:grid-cols-[minmax(280px,360px)_1fr_minmax(280px,360px)] gap-4 p-4 overflow-auto items-start">
         {/* Rules panel */}
         <section className="flex flex-col gap-3">
-          <button
-            onClick={() => setRulesCollapsed((v) => !v)}
-            className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-1"
-            title={rulesCollapsed ? "Expand rules" : "Collapse rules"}
-          >
-            <svg
-              className={["w-3 h-3 transition-transform text-indigo-400 dark:text-indigo-500", rulesCollapsed ? "-rotate-90" : ""].join(" ")}
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setRulesCollapsed((v) => !v)}
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-1"
+              title={rulesCollapsed ? "Expand rules" : "Collapse rules"}
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-            Rules &amp; Reference
-          </button>
-          {!rulesCollapsed && <RulesSectionList campaignId={campaign.id} mode={mode} />}
+              <svg
+                className={["w-3 h-3 transition-transform text-indigo-400 dark:text-indigo-500", rulesCollapsed ? "-rotate-90" : ""].join(" ")}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+              Rules &amp; Reference
+            </button>
+            <button
+              onClick={() => setFilterRulesByMode((v) => !v)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1"
+              title="Filter rules sections to the current mode (OVERLAND/DUNGEON)"
+            >
+              Filter: {filterRulesByMode ? "On" : "Off"}
+            </button>
+          </div>
+          {!rulesCollapsed && (
+            <RulesSectionList
+              campaignId={campaign.id}
+              mode={mode}
+              filterByMode={filterRulesByMode && mode !== "COMBAT"}
+            />
+          )}
         </section>
 
         {/* Generators panel — hidden in Combat mode */}

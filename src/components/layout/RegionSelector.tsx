@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useRandomTables } from "@/hooks/useRandomTables";
 
 interface Region {
@@ -66,6 +67,7 @@ const [open, setOpen] = useState(false);
       onRegionChange(regionId);
       qc.invalidateQueries({ queryKey: ["campaign", campaign.id] });
     },
+    onError: () => toast.error("Failed to change region"),
   });
 
   // ── Add region ────────────────────────────────────────────────────────────
@@ -87,6 +89,7 @@ const [open, setOpen] = useState(false);
       setAddingNew(false);
       setNewName("");
     },
+    onError: () => toast.error("Failed to add region"),
   });
 
   // ── Rename region ─────────────────────────────────────────────────────────
@@ -105,6 +108,7 @@ const [open, setOpen] = useState(false);
       setRegions((prev) => prev.map((r) => r.id === updated.id ? updated : r));
       setRenamingId(null);
     },
+    onError: () => toast.error("Failed to rename region"),
   });
 
   function startRename(r: Region) {
@@ -135,6 +139,7 @@ const [open, setOpen] = useState(false);
       }
       setConfirmDeleteId(null);
     },
+    onError: () => toast.error("Failed to delete region"),
   });
 
   function submitAdd() {
