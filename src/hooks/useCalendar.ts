@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CalendarConfig, CalendarNote } from "@/types/calendar";
+import type { CalendarConfig, CalendarNote, CalendarEvent } from "@/types/calendar";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,94 @@ export function useDeleteCalendarNote(campaignId: string) {
     onSuccess: (date) => {
       qc.invalidateQueries({ queryKey: ["calendar-notes", campaignId, date] });
       qc.invalidateQueries({ queryKey: ["calendar-notes", campaignId, "all"] });
+    },
+  });
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+export function useCalendarEvents(campaignId: string) {
+  return useQuery<CalendarEvent[]>({
+    queryKey: ["calendar-events", campaignId],
+    queryFn: async () => {
+      const url = new URL("/api/calendar/events", window.location.origin);
+      url.searchParams.set("campaignId", campaignId);
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error("Failed to fetch events");
+      return res.json();
+    },
+    enabled: !!campaignId,
+  });
+}
+
+export function useCreateCalendarEvent(campaignId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      title: string;
+      description?: string | null;
+      recurrence: string;
+      anchorDate: string;
+      endDate?: string | null;
+      moonId?: string | null;
+      moonPhase?: string | null;
+      color?: string;
+    }) => {
+      const res = await fetch("/api/calendar/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId, ...data }),
+      });
+      if (!res.ok) throw new Error("Failed to create event");
+      return res.json() as Promise<CalendarEvent>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["calendar-events", campaignId] });
+    },
+  });
+}
+
+export function useUpdateCalendarEvent(campaignId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...data
+    }: {
+      id: string;
+      title?: string;
+      description?: string | null;
+      recurrence?: string;
+      anchorDate?: string;
+      endDate?: string | null;
+      moonId?: string | null;
+      moonPhase?: string | null;
+      color?: string;
+    }) => {
+      const res = await fetch(`/api/calendar/events/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update event");
+      return res.json() as Promise<CalendarEvent>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["calendar-events", campaignId] });
+    },
+  });
+}
+
+export function useDeleteCalendarEvent(campaignId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/calendar/events/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete event");
+      return id;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["calendar-events", campaignId] });
     },
   });
 }

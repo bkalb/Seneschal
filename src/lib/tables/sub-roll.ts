@@ -2,6 +2,20 @@ import { rollExpression } from "@/lib/dice/roller";
 import { scanAndRollInlineNotation } from "@/lib/dice/outcome-expander";
 import type { TableRow } from "@/types/table";
 
+/**
+ * Default number of sub-rolls for a "for each X" instruction that doesn't
+ * specify an explicit count (e.g. "roll a d20 for each side"). Two combatant
+ * sides is the common case in most encounter rulesets.
+ */
+const DEFAULT_FOR_EACH_COUNT = 2;
+
+/** Clamp a derived "for each" count to a sane range, guarding against a pathological "for each 999". */
+const MIN_FOR_EACH_COUNT = 1;
+const MAX_FOR_EACH_COUNT = 20;
+function clampForEachCount(n: number): number {
+  return Math.min(MAX_FOR_EACH_COUNT, Math.max(MIN_FOR_EACH_COUNT, n));
+}
+
 export interface SubRollEntry {
   roll: number;
   outcome: string;        // raw outcome text
@@ -39,11 +53,16 @@ const SUB_ROLL_PATTERNS: Array<{
 }> = [
   // "roll a d20 for each side" / "roll 1d20 for each side"
   // "roll a d6 for each group" / "roll dN for each X"
+  // "roll a d6 for each of the 3 groups" — an explicit leading integer in the
+  // "each" clause overrides the DEFAULT_FOR_EACH_COUNT fallback.
   {
-    pattern: /\broll(?:\s+(?:a|\d+))?\s*d(\d+)\s+for\s+(each\s+\w+)/gi,
+    pattern: /\broll(?:\s+(?:a|\d+))?\s*d(\d+)\s+for\s+each\s+(?:of\s+(?:the\s+)?)?(\d+)?\s*(\w+)/gi,
     dieGroup: 1,
-    count: () => 2,
-    label: (m) => m[2],          // e.g. "each side"
+    count: (m) => {
+      const explicitCount = m[2] ? parseInt(m[2], 10) : NaN;
+      return clampForEachCount(isNaN(explicitCount) ? DEFAULT_FOR_EACH_COUNT : explicitCount);
+    },
+    label: (m) => `each ${m[2] ? `${m[2]} ` : ""}${m[3]}`, // e.g. "each side" or "each 3 groups"
   },
 
   // "roll a d20" / "roll 1d20" / "roll d20"

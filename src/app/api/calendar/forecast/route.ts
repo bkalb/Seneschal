@@ -14,8 +14,8 @@ import { requireSession } from "@/lib/api-helpers";
 import { parseDate, formatDate, advanceDate, getCurrentSeason } from "@/lib/calendar/engine";
 import { rollOnTable } from "@/lib/tables/engine";
 import { shapeTable, tableInclude } from "@/lib/tables/shape-table";
-import { rollEncounterFull, lookupOutcomeByRoll } from "@/lib/tables/encounter-roll";
-import { rollEncounterTime, parseEncounterWindows } from "@/lib/encounter-timing";
+import { rollEncounterFull, rollEncounterForWindows, lookupOutcomeByRoll } from "@/lib/tables/encounter-roll";
+import { parseEncounterWindows } from "@/lib/encounter-timing";
 import type { RandomTable } from "@/types/table";
 import type { EncounterSummary } from "@/lib/tables/encounter-roll";
 
@@ -209,6 +209,8 @@ export async function GET(request: NextRequest) {
 
   let dayEncounter: EncounterSummary | null = null;
   let nightEncounter: EncounterSummary | null = null;
+  // One entry per configured encounter window (superset of day/night above).
+  let encounters: EncounterSummary[] = [];
 
   if (encounterTableOverrideId || currentRegionId) {
     const encounterRaw = encounterTableOverrideId
@@ -227,8 +229,6 @@ export async function GET(request: NextRequest) {
       const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
 
       const windows = parseEncounterWindows((campaign as any).encounterWindowsJson ?? "[]");
-      const dayWindow = windows[0] ?? null;
-      const nightWindow = windows[1] ?? null;
 
       const rollParams = {
         table: encounterTable,
@@ -238,29 +238,13 @@ export async function GET(request: NextRequest) {
         campaignDefaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
       };
 
-      const dayResult = rollEncounterFull(rollParams);
-      dayEncounter = {
-        label: dayWindow?.name ?? "Day",
-        time: dayWindow ? rollEncounterTime(dayWindow) : null,
-        outcome: dayResult.resolvedOutcome.expandedText,
-        roll: dayResult.diceTotal,
-        reaction: dayResult.reaction ?? null,
-        surprise: dayResult.surprise ?? null,
-        prerequisiteRoll: dayResult.prerequisiteRoll ?? null,
-      };
-
-      const nightResult = rollEncounterFull(rollParams);
-      nightEncounter = {
-        label: nightWindow?.name ?? "Night",
-        time: nightWindow ? rollEncounterTime(nightWindow) : null,
-        outcome: nightResult.resolvedOutcome.expandedText,
-        roll: nightResult.diceTotal,
-        reaction: nightResult.reaction ?? null,
-        surprise: nightResult.surprise ?? null,
-        prerequisiteRoll: nightResult.prerequisiteRoll ?? null,
-      };
+      // One roll per configured window. `day`/`night` are kept populated from
+      // window 0 / window 1 for back-compat with existing readers.
+      encounters = rollEncounterForWindows(windows, rollParams);
+      dayEncounter = encounters[0] ?? null;
+      nightEncounter = encounters[1] ?? null;
     }
   }
 
-  return NextResponse.json({ todayRolls, forecastRolls, dayEncounter, nightEncounter });
+  return NextResponse.json({ todayRolls, forecastRolls, dayEncounter, nightEncounter, encounters });
 }

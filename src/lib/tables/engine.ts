@@ -18,6 +18,19 @@ export function rollOnTable(
     table.prerequisiteMax !== null
   ) {
     const prereqResult = rollExpression(table.prerequisiteDice);
+    if (prereqResult.expression.sides === 0) {
+      const invalidText = `Invalid dice expression: ${table.prerequisiteDice}`;
+      return {
+        tableId: table.id,
+        tableName: table.name,
+        rawDiceTotal: 0,
+        diceTotal: 0,
+        appliedModifiers: [],
+        matchedRow: { id: "", tableId: table.id, min: 0, max: 0, outcome: invalidText },
+        resolvedOutcome: { rawText: invalidText, expandedText: invalidText, inlineRolls: [] },
+        timestamp: Date.now(),
+      };
+    }
     const passed =
       prereqResult.total >= table.prerequisiteMin &&
       prereqResult.total <= table.prerequisiteMax;
@@ -44,6 +57,20 @@ export function rollOnTable(
   }
 
   const baseRoll = rollExpression(table.diceExpression);
+  if (baseRoll.expression.sides === 0) {
+    const invalidText = `Invalid dice expression: ${table.diceExpression}`;
+    return {
+      tableId: table.id,
+      tableName: table.name,
+      rawDiceTotal: 0,
+      diceTotal: 0,
+      appliedModifiers: [],
+      matchedRow: { id: "", tableId: table.id, min: 0, max: 0, outcome: invalidText },
+      resolvedOutcome: { rawText: invalidText, expandedText: invalidText, inlineRolls: [] },
+      timestamp: Date.now(),
+      ...(prerequisiteRoll !== null && { prerequisiteRoll }),
+    };
+  }
   const rawDiceTotal = baseRoll.total;
 
   const appliedModifiers = resolveModifiers(table, currentRegionId, userToggles);

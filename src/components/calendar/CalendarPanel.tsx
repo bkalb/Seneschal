@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import type { CalendarNote } from "@/types/calendar";
+import { useState, useEffect, useRef, useMemo } from "react";
+import type { CalendarNote, CalendarEvent, EventRecurrence, MoonPhase } from "@/types/calendar";
 import {
   useCalendarConfig,
   useCalendarNotes,
   useCreateCalendarNote,
   useUpdateCalendarNote,
   useDeleteCalendarNote,
+  useCalendarEvents,
+  useCreateCalendarEvent,
+  useUpdateCalendarEvent,
+  useDeleteCalendarEvent,
   useAdvanceDay,
   useSetCurrentDate,
   useRerollForRegion,
@@ -24,6 +28,7 @@ import { TableManagerModal } from "@/components/tables/TableManagerModal";
 import { MoonPhaseIcon } from "./MoonPhaseIcon";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { FLAG_COLORS } from "@/components/flags/FlagStrip";
 import {
   parseDate,
   formatDate,
@@ -32,7 +37,44 @@ import {
   firstWeekdayOfMonth,
 } from "@/lib/calendar/engine";
 import { computeAllMoonPhases } from "@/lib/calendar/moon";
+import { occurrencesInRange, upcomingEvents, type EventOccurrence } from "@/lib/calendar/events";
 import { extractCombatantInfo } from "@/lib/combat-prefill";
+
+const MOON_PHASE_NAMES: MoonPhase[] = [
+  "new",
+  "waxing_crescent",
+  "first_quarter",
+  "waxing_gibbous",
+  "full",
+  "waning_gibbous",
+  "last_quarter",
+  "waning_crescent",
+];
+
+const RECURRENCE_OPTIONS: { value: EventRecurrence; label: string }[] = [
+  { value: "ONCE", label: "Once" },
+  { value: "ANNUAL", label: "Annual" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "MOON_PHASE", label: "Moon phase" },
+];
+
+// Recursively pull plain text out of a TipTap JSON document for search.
+function extractPlainText(tiptapJson: string): string {
+  if (!tiptapJson) return "";
+  try {
+    const doc = JSON.parse(tiptapJson);
+    const parts: string[] = [];
+    const walk = (node: any) => {
+      if (!node) return;
+      if (typeof node.text === "string") parts.push(node.text);
+      if (Array.isArray(node.content)) node.content.forEach(walk);
+    };
+    walk(doc);
+    return parts.join(" ");
+  } catch {
+    return tiptapJson;
+  }
+}
 
 // Parse the DB-backed calendar encounter summaries. Date-keyed: a slot is only used
 // if the stored date matches the current date, so stale summaries from a previous day are ignored.
@@ -63,6 +105,16 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
   const [calendarCollapsed, setCalendarCollapsed] = useState(initialCollapsed);
   const { data: config, isLoading: configLoading } = useCalendarConfig(campaignId);
   const { data: notes = [] } = useCalendarNotes(campaignId);
+  const { data: events = [] } = useCalendarEvents(campaignId);
+  const createEventMutation = useCreateCalendarEvent(campaignId);
+  const updateEventMutation = useUpdateCalendarEvent(campaignId);
+  const deleteEventMutation = useDeleteCalendarEvent(campaignId);
+
+  const [showEventEditor, setShowEventEditor] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+  const [eventEditorAnchorDate, setEventEditorAnchorDate] = useState<string | null>(null);
+  const [upcomingCollapsed, setUpcomingCollapsed] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   // Local copy of the current date — updated immediately on mutation success
   // (the campaign prop is server-rendered and won't re-stream on client mutations)
@@ -275,6 +327,20 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
 
   const noteDateSet = new Set(notes.map((n) => n.date));
   const isCurrentMonth = viewYear === currentParsed.year && viewMonth === currentParsed.month;
+
+  // Event occurrences for the visible month, grouped by date for the grid pips.
+  const firstOfMonth = formatDate({ year: viewYear, month: viewMonth, day: 1 });
+  const lastOfMonth = formatDate({ year: viewYear, month: viewMonth, day: daysInMonth });
+  const monthOccurrences = occurrencesInRange(events, firstOfMonth, lastOfMonth, config);
+  const occurrencesByDate = new Map<string, EventOccurrence[]>();
+  for (const occ of monthOccurrences) {
+    const list = occurrencesByDate.get(occ.date) ?? [];
+    list.push(occ);
+    occurrencesByDate.set(occ.date, list);
+  }
+
+  // Next occurrence of every event, on/after today — for the upcoming list.
+  const upcoming = upcomingEvents(events, currentDate, config).slice(0, 8);
 
   // All tables that auto-roll on day advance
   const dailyTables = calendarTables.filter((t) => t.rollOnDayAdvance);
@@ -575,12 +641,14 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
               viewMonth === currentParsed.month &&
               day === currentParsed.day;
             const hasNote = noteDateSet.has(dateStr);
+            const dayEvents = occurrencesByDate.get(dateStr) ?? [];
             const dayMoonPhases = computeAllMoonPhases({ year: viewYear, month: viewMonth, day }, config);
 
             return (
               <button
                 key={day}
                 onClick={() => setSelectedDate(dateStr)}
+                title={dayEvents.length > 0 ? dayEvents.map((o) => o.event.title).join(", ") : undefined}
                 className={[
                   "relative flex flex-col items-center rounded py-0.5 text-[11px] transition-colors hover:bg-muted min-h-[32px] gap-0.5",
                   isToday ? "bg-primary/15 text-primary font-semibold ring-1 ring-primary/40" : "text-foreground",
@@ -594,6 +662,17 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
                     ))}
                   </div>
                 )}
+                {dayEvents.length > 0 && (
+                  <div className="flex gap-px absolute bottom-0.5 left-1/2 -translate-x-1/2">
+                    {dayEvents.slice(0, 3).map((occ) => (
+                      <span
+                        key={occ.event.id}
+                        className="w-1 h-1 rounded-full"
+                        style={{ backgroundColor: occ.event.color }}
+                      />
+                    ))}
+                  </div>
+                )}
                 {hasNote && (
                   <span className="absolute bottom-0.5 right-0.5 w-1 h-1 rounded-full bg-primary/60" />
                 )}
@@ -601,6 +680,75 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
             );
           })}
         </div>
+      </div>
+
+      {/* Upcoming events */}
+      <div className="border-t border-border">
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <button
+            onClick={() => setUpcomingCollapsed((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <svg
+              className={["w-3 h-3 transition-transform", upcomingCollapsed ? "-rotate-90" : ""].join(" ")}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+            Upcoming Events {upcoming.length > 0 && <span className="text-muted-foreground/70">({upcoming.length})</span>}
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSearch(true)}
+              title="Search notes & events"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => { setEditingEvent(null); setEventEditorAnchorDate(currentDate); setShowEventEditor(true); }}
+              title="Add event"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {!upcomingCollapsed && (
+          <div className="px-3 pb-2 space-y-1">
+            {upcoming.length === 0 && (
+              <p className="text-xs text-muted-foreground">No upcoming events.</p>
+            )}
+            {upcoming.map((occ) => {
+              const d = parseDate(occ.date);
+              const mName = config.months[d.month - 1]?.name ?? `Month ${d.month}`;
+              return (
+                <button
+                  key={occ.event.id}
+                  onClick={() => {
+                    setViewYear(d.year);
+                    setViewMonth(d.month);
+                    setEditingEvent(occ.event);
+                    setEventEditorAnchorDate(occ.event.anchorDate);
+                    setShowEventEditor(true);
+                  }}
+                  className="w-full flex items-center gap-2 text-left rounded px-1.5 py-1 hover:bg-muted transition-colors"
+                >
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: occ.event.color }} />
+                  <span className="text-xs flex-1 truncate">{occ.event.title}</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0">{mName} {d.day}</span>
+                  <span className="text-[10px] font-medium shrink-0 text-primary">
+                    {occ.daysUntil === 0 ? "today" : `in ${occ.daysUntil}d`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       </>)} {/* end collapsible body */}
@@ -649,6 +797,54 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
           regions={regions}
           seasons={config?.seasons.map((s) => s.name) ?? []}
           onClose={() => setShowTableManager(false)}
+        />
+      )}
+
+      {showEventEditor && (
+        <EventEditorDialog
+          event={editingEvent}
+          defaultAnchorDate={eventEditorAnchorDate ?? currentDate}
+          config={config}
+          onClose={() => { setShowEventEditor(false); setEditingEvent(null); }}
+          onSave={async (data) => {
+            if (editingEvent) {
+              await updateEventMutation.mutateAsync({ id: editingEvent.id, ...data });
+            } else {
+              await createEventMutation.mutateAsync(data);
+            }
+            setShowEventEditor(false);
+            setEditingEvent(null);
+          }}
+          onDelete={editingEvent ? async () => {
+            await deleteEventMutation.mutateAsync(editingEvent.id);
+            setShowEventEditor(false);
+            setEditingEvent(null);
+          } : undefined}
+        />
+      )}
+
+      {showSearch && (
+        <CalendarSearchDialog
+          notes={notes}
+          events={events}
+          config={config}
+          onClose={() => setShowSearch(false)}
+          onJumpToDate={(date) => {
+            const d = parseDate(date);
+            setViewYear(d.year);
+            setViewMonth(d.month);
+            setSelectedDate(date);
+            setShowSearch(false);
+          }}
+          onJumpToEvent={(event) => {
+            const d = parseDate(event.anchorDate);
+            setViewYear(d.year);
+            setViewMonth(d.month);
+            setEditingEvent(event);
+            setEventEditorAnchorDate(event.anchorDate);
+            setShowEventEditor(true);
+            setShowSearch(false);
+          }}
         />
       )}
     </div>
@@ -810,6 +1006,314 @@ function DayDetailSheet({ campaignId, date, currentDate, config, notes, onClose,
           >
             {isSavePending ? "Saving…" : "Save note"}
           </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Event Editor Dialog ──────────────────────────────────────────────────────
+
+interface EventEditorProps {
+  event: CalendarEvent | null;
+  defaultAnchorDate: string;
+  config: import("@/types/calendar").CalendarConfig;
+  onClose: () => void;
+  onSave: (data: {
+    title: string;
+    description: string | null;
+    recurrence: EventRecurrence;
+    anchorDate: string;
+    endDate: string | null;
+    moonId: string | null;
+    moonPhase: string | null;
+    color: string;
+  }) => Promise<void>;
+  onDelete?: () => Promise<void>;
+}
+
+function EventEditorDialog({ event, defaultAnchorDate, config, onClose, onSave, onDelete }: EventEditorProps) {
+  const [title, setTitle] = useState(event?.title ?? "");
+  const [description, setDescription] = useState(event?.description ?? "");
+  const [recurrence, setRecurrence] = useState<EventRecurrence>(event?.recurrence ?? "ONCE");
+  const [anchorDate, setAnchorDate] = useState(event?.anchorDate ?? defaultAnchorDate);
+  const [endDate, setEndDate] = useState(event?.endDate ?? "");
+  const [moonId, setMoonId] = useState(event?.moonId ?? config.moons[0]?.id ?? "");
+  const [moonPhase, setMoonPhase] = useState<string>(event?.moonPhase ?? "full");
+  const [color, setColor] = useState(event?.color ?? FLAG_COLORS[6].value); // Blue default
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(anchorDate.trim());
+  const canSave = title.trim().length > 0 && dateValid;
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        description: description.trim() || null,
+        recurrence,
+        anchorDate: anchorDate.trim(),
+        endDate: recurrence === "ONCE" && endDate.trim() ? endDate.trim() : null,
+        moonId: recurrence === "MOON_PHASE" ? (moonId || null) : null,
+        moonPhase: recurrence === "MOON_PHASE" ? moonPhase : null,
+        color,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md sm:max-w-md max-h-[85vh] flex flex-col gap-0 p-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+          <p className="font-semibold text-sm">{event ? "Edit Event" : "Add Event"}</p>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Title</label>
+            <input
+              autoFocus
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Event title"
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Recurrence</label>
+            <select
+              value={recurrence}
+              onChange={(e) => setRecurrence(e.target.value as EventRecurrence)}
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {RECURRENCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {recurrence !== "MOON_PHASE" && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 space-y-1">
+                <label className="text-xs text-muted-foreground">
+                  {recurrence === "ONCE" ? "Date" : recurrence === "ANNUAL" ? "Month/day (year ignored)" : "Day of month"}
+                </label>
+                <input
+                  type="text"
+                  value={anchorDate}
+                  onChange={(e) => setAnchorDate(e.target.value)}
+                  placeholder="YYYY-MM-DD"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              {recurrence === "ONCE" && (
+                <div className="flex-1 space-y-1">
+                  <label className="text-xs text-muted-foreground">End date (optional)</label>
+                  <input
+                    type="text"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    placeholder="YYYY-MM-DD"
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {recurrence === "MOON_PHASE" && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 space-y-1">
+                <label className="text-xs text-muted-foreground">Moon</label>
+                <select
+                  value={moonId}
+                  onChange={(e) => setMoonId(e.target.value)}
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {config.moons.length === 0 && <option value="">No moons configured</option>}
+                  {config.moons.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 space-y-1">
+                <label className="text-xs text-muted-foreground">Phase</label>
+                <select
+                  value={moonPhase}
+                  onChange={(e) => setMoonPhase(e.target.value)}
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {MOON_PHASE_NAMES.map((p) => (
+                    <option key={p} value={p}>{p.replace(/_/g, " ")}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Description (optional)</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Notes about this event…"
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Color</label>
+            <div className="flex flex-wrap gap-1.5">
+              {FLAG_COLORS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setColor(c.value)}
+                  title={c.label}
+                  className={[
+                    "w-5 h-5 rounded-full transition-transform",
+                    color === c.value ? "ring-2 ring-offset-1 ring-primary scale-110" : "",
+                  ].join(" ")}
+                  style={{ backgroundColor: c.value }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-between items-center px-4 py-3 border-t border-border shrink-0 gap-2">
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
+              Cancel
+            </button>
+            {onDelete && !confirmDelete && (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="px-3 py-1.5 text-sm text-destructive hover:text-destructive/80"
+              >
+                Delete
+              </button>
+            )}
+            {onDelete && confirmDelete && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Delete this event?</span>
+                <button
+                  onClick={onDelete}
+                  className="text-xs px-2 py-0.5 rounded bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Yes, delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  No
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={saving || !canSave}
+            className="px-4 py-1.5 rounded text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save event"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Calendar Search Dialog (notes + events) ──────────────────────────────────
+
+interface SearchDialogProps {
+  notes: CalendarNote[];
+  events: CalendarEvent[];
+  config: import("@/types/calendar").CalendarConfig;
+  onClose: () => void;
+  onJumpToDate: (date: string) => void;
+  onJumpToEvent: (event: CalendarEvent) => void;
+}
+
+function CalendarSearchDialog({ notes, events, config, onClose, onJumpToDate, onJumpToEvent }: SearchDialogProps) {
+  const [query, setQuery] = useState("");
+
+  const noteResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return notes
+      .map((n) => ({ note: n, text: extractPlainText(n.content) }))
+      .filter(({ note, text }) => !q || note.date.includes(q) || text.toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [notes, query]);
+
+  const eventResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return events
+      .filter((e) => !q || e.title.toLowerCase().includes(q) || (e.description ?? "").toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [events, query]);
+
+  function formatLabel(dateStr: string) {
+    const d = parseDate(dateStr);
+    const monthName = config.months[d.month - 1]?.name ?? `Month ${d.month}`;
+    return `${monthName} ${d.day}, Year ${d.year}`;
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg sm:max-w-lg max-h-[85vh] flex flex-col gap-0 p-0">
+        <div className="px-4 py-3 border-b border-border shrink-0 space-y-2">
+          <p className="font-semibold text-sm">Search Notes &amp; Events</p>
+          <input
+            autoFocus
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by text or title…"
+            className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+              Events {eventResults.length > 0 && `(${eventResults.length})`}
+            </p>
+            {eventResults.length === 0 && <p className="text-xs text-muted-foreground">No matching events.</p>}
+            {eventResults.map((e) => (
+              <button
+                key={e.id}
+                onClick={() => onJumpToEvent(e)}
+                className="w-full flex items-center gap-2 text-left rounded px-1.5 py-1 hover:bg-muted transition-colors"
+              >
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: e.color }} />
+                <span className="text-xs flex-1 truncate">{e.title}</span>
+                <span className="text-[10px] text-muted-foreground shrink-0">{formatLabel(e.anchorDate)}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+              Notes {noteResults.length > 0 && `(${noteResults.length})`}
+            </p>
+            {noteResults.length === 0 && <p className="text-xs text-muted-foreground">No matching notes.</p>}
+            {noteResults.map(({ note, text }) => (
+              <button
+                key={note.id}
+                onClick={() => onJumpToDate(note.date)}
+                className="w-full text-left rounded px-1.5 py-1 hover:bg-muted transition-colors space-y-0.5"
+              >
+                <p className="text-[10px] text-muted-foreground">{formatLabel(note.date)}</p>
+                <p className="text-xs truncate">{text || <span className="italic text-muted-foreground">(empty)</span>}</p>
+              </button>
+            ))}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

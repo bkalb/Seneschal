@@ -1,6 +1,7 @@
 import { rollOnTable } from "./engine";
 import { rollExpression } from "@/lib/dice/roller";
 import { detectAndResolveSubRolls } from "./sub-roll";
+import { rollEncounterTime, type EncounterWindow } from "@/lib/encounter-timing";
 import type { RandomTable, ReactionResult, SurpriseResult, SubRoll, TableRollResult, PrerequisiteRoll } from "@/types/table";
 
 export interface FullEncounterResult extends TableRollResult {
@@ -74,4 +75,46 @@ export function rollEncounterFull({
 export function lookupOutcomeByRoll(roll: number, table: RandomTable): string {
   const row = table.rows.find((r) => r.min <= roll && r.max >= roll);
   return row?.outcome ?? table.rows[0]?.outcome ?? "—";
+}
+
+/**
+ * Roll one full encounter per configured encounter window, in order.
+ *
+ * Generalizes the old two hand-written "day"/"night" blocks to an arbitrary
+ * number of campaign-defined windows. When no windows are configured at all
+ * (a campaign that never set up `encounterWindowsJson`), falls back to the
+ * legacy default of a plain "Day" + "Night" roll (no time-of-day) so
+ * unconfigured campaigns keep behaving as before.
+ */
+export function rollEncounterForWindows(
+  windows: EncounterWindow[],
+  rollParams: Parameters<typeof rollEncounterFull>[0]
+): EncounterSummary[] {
+  if (windows.length === 0) {
+    return ["Day", "Night"].map((label) => {
+      const result = rollEncounterFull(rollParams);
+      return {
+        label,
+        time: null,
+        outcome: result.resolvedOutcome.expandedText,
+        roll: result.diceTotal,
+        reaction: result.reaction ?? null,
+        surprise: result.surprise ?? null,
+        prerequisiteRoll: result.prerequisiteRoll ?? null,
+      };
+    });
+  }
+
+  return windows.map((window) => {
+    const result = rollEncounterFull(rollParams);
+    return {
+      label: window.name,
+      time: rollEncounterTime(window),
+      outcome: result.resolvedOutcome.expandedText,
+      roll: result.diceTotal,
+      reaction: result.reaction ?? null,
+      surprise: result.surprise ?? null,
+      prerequisiteRoll: result.prerequisiteRoll ?? null,
+    };
+  });
 }

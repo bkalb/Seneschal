@@ -40,7 +40,7 @@ export async function GET(
     }
 
     const exported = {
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
       campaign: serializeCampaign(campaign),
     };

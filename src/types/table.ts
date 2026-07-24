@@ -32,7 +32,6 @@ export interface TableModifier {
 }
 
 export type ModifierExtraConfig =
-  | { type: "multiply_chance"; factor: number }
   | { type: "override_outcome"; outcomeText: string }
   | { type: "prev_result_condition"; operator: "lte" | "gte" | "eq"; threshold: number };
 
@@ -86,11 +85,15 @@ export interface DiceExpression {
   count: number;
   sides: number;
   raw: string;
+  modifier?: number;                 // flat ±K, default 0
+  keep?: { mode: "h" | "l"; count: number } | null;
 }
 
 export interface DiceRollResult {
   expression: DiceExpression;
   rolls: number[];
+  // The dice that counted toward `total` (all of `rolls` unless keep/drop applies).
+  kept: number[];
   total: number;
 }
 

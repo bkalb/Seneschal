@@ -102,6 +102,7 @@ model Campaign {
   savedNpcs         SavedNpc[]
   calendarConfig    CalendarConfig?
   calendarNotes     CalendarNote[]
+  calendarEvents    CalendarEvent[]
   flags             CampaignFlag[]
   dungeonConfig     DungeonConfig?
   lightSourceTypes  LightSourceType[]
@@ -252,7 +253,7 @@ model TableModifier {
   label          String
   behavior       String      // "ALWAYS" | "AUTO_REGION" | "CONDITIONAL_REGION"
   rollAdjustment Int         @default(0)
-  // JSON for non-additive effects e.g. { type: "multiply_chance", factor: 2 }
+  // JSON for non-additive effects e.g. { type: "override_outcome", outcomeText: "..." }
   extraConfig    String?
 
   autoRegions        Region[] @relation("ModifierAutoRegions")
@@ -364,6 +365,8 @@ model Moon {
   cycleLength      Int
   // A known new-moon date in "YYYY-MM-DD" used as reference epoch
   referenceNewMoon String
+
+  events CalendarEvent[]
 }
 
 // ─── Flags ────────────────────────────────────────────────────────────────────
@@ -402,6 +405,30 @@ model CalendarNote {
   updatedAt  DateTime @updatedAt
 
   @@index([campaignId, date])
+}
+
+model CalendarEvent {
+  id           String   @id @default(cuid())
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?              // optional TipTap JSON or plain text; plain text is fine v1
+  // Recurrence discriminator: "ONCE" | "ANNUAL" | "MONTHLY" | "MOON_PHASE"
+  recurrence   String   @default("ONCE")
+  // Anchor date "YYYY-MM-DD" (campaign calendar). For ONCE: the date.
+  // For ANNUAL: year ignored, month+day used. For MONTHLY: day-of-month used.
+  anchorDate   String
+  // Optional end date for multi-day ONCE events (inclusive); null = single day.
+  endDate      String?
+  // MOON_PHASE recurrence targeting:
+  moonId       String?              // which moon
+  moon         Moon?    @relation(fields: [moonId], references: [id], onDelete: Cascade)
+  moonPhase    String?              // one of the 8 MoonPhase names, e.g. "full"
+  color        String   @default("#93c5fd")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([campaignId])
 }
 
 // ─── Dungeon exploration ──────────────────────────────────────────────────────

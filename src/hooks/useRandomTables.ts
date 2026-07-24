@@ -62,6 +62,23 @@ export function useUpdateTable(campaignId: string) {
   });
 }
 
+export function useDuplicateTable(campaignId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/random-tables/${id}/duplicate`, { method: "POST" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => `HTTP ${res.status}`);
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json() as Promise<RandomTable>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["random-tables", campaignId] });
+    },
+  });
+}
+
 export function useDeleteTable(campaignId: string) {
   const qc = useQueryClient();
   return useMutation({

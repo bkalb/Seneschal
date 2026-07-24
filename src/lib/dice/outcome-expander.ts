@@ -49,11 +49,9 @@ export function scanAndRollInlineNotation(text: string): ResolvedOutcome {
     candidates.push({
       start,
       end: start + fullMatch.length,
-      evaluate: () => {
-        const rolled = rollExpression(diceExpr).total;
-        const modifier = modifierStr ? parseInt(modifierStr, 10) : 0;
-        return { result: rolled + modifier, notation: fullMatch };
-      },
+      // Route the full "NdM±K" span through the shared roller in one call so the
+      // flat modifier is applied by the single-sourced grammar, not re-parsed here.
+      evaluate: () => ({ result: rollExpression(fullMatch).total, notation: fullMatch }),
     });
   }
 

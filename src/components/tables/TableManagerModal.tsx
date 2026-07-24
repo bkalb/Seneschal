@@ -3,11 +3,11 @@
 import { useState } from "react";
 import type { RandomTable } from "@/types/table";
 import { TableEditModal } from "./TableEditModal";
-import { useDeleteTable, useUpdateTable } from "@/hooks/useRandomTables";
+import { useDeleteTable, useUpdateTable, useDuplicateTable } from "@/hooks/useRandomTables";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { PencilIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, Trash2Icon, CopyIcon } from "lucide-react";
 
 interface Props {
   title: string;
@@ -25,6 +25,7 @@ export function TableManagerModal({ title, tables, campaignId, regions, seasons,
 
   const deleteMutation = useDeleteTable(campaignId);
   const updateMutation = useUpdateTable(campaignId);
+  const duplicateMutation = useDuplicateTable(campaignId);
   const sorted = tables
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -116,6 +117,15 @@ export function TableManagerModal({ title, tables, campaignId, regions, seasons,
                           tooltip="Edit table"
                         >
                           <PencilIcon />
+                        </IconButton>
+                        <IconButton
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => duplicateMutation.mutate(table.id)}
+                          disabled={duplicateMutation.isPending}
+                          tooltip="Duplicate table"
+                        >
+                          <CopyIcon />
                         </IconButton>
                         <IconButton
                           variant="ghost"

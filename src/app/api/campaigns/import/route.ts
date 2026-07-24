@@ -46,6 +46,12 @@ const tableSchema = z.object({
   prerequisiteDice: z.string().nullable().optional(),
   prerequisiteMin: z.number().int().nullable().optional(),
   prerequisiteMax: z.number().int().nullable().optional(),
+  lastResult: z.number().int().nullable().optional(),
+  lastModifiedResult: z.number().int().nullable().optional(),
+  forecastResult: z.number().int().nullable().optional(),
+  forecastModifiedResult: z.number().int().nullable().optional(),
+  forecastDate: z.string().nullable().optional(),
+  forecastOutcome: z.string().nullable().optional(),
   rows: z.array(rowSchema).default([]),
   regionNames: z.array(z.string()).default([]),
   modifiers: z.array(modifierSchema).default([]),
@@ -89,6 +95,19 @@ const noteSchema = z.object({
   content: z.string(),
 });
 
+const eventRecurrenceEnum = z.enum(["ONCE", "ANNUAL", "MONTHLY", "MOON_PHASE"]);
+
+const eventSchema = z.object({
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  recurrence: eventRecurrenceEnum.default("ONCE"),
+  anchorDate: z.string(),
+  endDate: z.string().nullable().optional(),
+  moonName: z.string().nullable().optional(),
+  moonPhase: z.string().nullable().optional(),
+  color: z.string().default("#93c5fd"),
+});
+
 const flagSchema = z.object({
   label: z.string(),
   color: z.string().default("#fecdd3"),
@@ -122,6 +141,33 @@ const lightSourceTypeSchema = z.object({
   sortOrder: z.number().int().default(0),
 });
 
+const npcAffiliationSchema = z.object({
+  name: z.string(),
+});
+
+const savedNpcSchema = z.object({
+  name: z.string().nullable().optional(),
+  gender: z.string().default("male"),
+  age: z.string().nullable().optional(),
+  type: z.string().nullable().optional(),
+  typeLabel: z.string().default("Type"),
+  secondaryType: z.string().nullable().optional(),
+  secondaryTypeLabel: z.string().nullable().optional(),
+  physicalJson: z.string().default("[]"),
+  personalityJson: z.string().default("[]"),
+  detailsJson: z.string().default("[]"),
+  isDeceased: z.boolean().default(false),
+  isPinned: z.boolean().default(false),
+  notes: z.string().nullable().optional(),
+  isCombatant: z.boolean().default(false),
+  combatAc: z.number().int().nullable().optional(),
+  combatHd: z.string().nullable().optional(),
+  combatMaxHp: z.number().int().nullable().optional(),
+  combatAttackBonus: z.number().int().nullable().optional(),
+  combatAttackDamage: z.string().nullable().optional(),
+  affiliationName: z.string().nullable().optional(),
+});
+
 const importSchema = z.object({
   version: z.number().int(),
   campaign: z.object({
@@ -145,6 +191,9 @@ const importSchema = z.object({
       forecastingMode: z.boolean().default(false),
       currentRegionName: z.string().nullable().optional(),
       currentDungeonRegionName: z.string().nullable().optional(),
+      todayWeatherJson: z.string().nullable().optional(),
+      encounterPanelStateJson: z.string().nullable().optional(),
+      calendarEncounterStateJson: z.string().nullable().optional(),
     }).optional(),
     regions: z.array(regionSchema).default([]),
     rulesSections: z.array(rulesSectionSchema).default([]),
@@ -152,9 +201,12 @@ const importSchema = z.object({
     npcProfiles: z.array(npcProfileSchema).default([]),
     calendarConfig: calendarConfigSchema.nullable().optional(),
     calendarNotes: z.array(noteSchema).default([]),
+    calendarEvents: z.array(eventSchema).default([]),
     flags: z.array(flagSchema).default([]),
     dungeonConfig: dungeonConfigSchema.nullable().optional(),
     lightSourceTypes: z.array(lightSourceTypeSchema).default([]),
+    npcAffiliations: z.array(npcAffiliationSchema).default([]),
+    savedNpcs: z.array(savedNpcSchema).default([]),
   }),
 });
 

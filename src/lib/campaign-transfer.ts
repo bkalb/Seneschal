@@ -32,9 +32,12 @@ export const campaignTransferInclude = {
   npcProfiles: { orderBy: { sortOrder: "asc" } },
   calendarConfig: { include: { moons: true } },
   calendarNotes: { orderBy: { date: "asc" } },
+  calendarEvents: { orderBy: { createdAt: "asc" } },
   flags: { orderBy: { sortOrder: "asc" } },
   dungeonConfig: true,
   lightSourceTypes: { orderBy: { sortOrder: "asc" } },
+  npcAffiliations: { orderBy: { name: "asc" } },
+  savedNpcs: { orderBy: { createdAt: "asc" } },
 } satisfies Prisma.CampaignInclude;
 
 export type CampaignWithTransferData = Prisma.CampaignGetPayload<{
@@ -64,6 +67,12 @@ export interface CampaignTransferPayload {
     forecastingMode: boolean;
     currentRegionName?: string | null;
     currentDungeonRegionName?: string | null;
+    // JSON array of today's weather rolls (in-progress session state)
+    todayWeatherJson?: string | null;
+    // JSON: encounter panel last roll per mode
+    encounterPanelStateJson?: string | null;
+    // JSON: calendar day/night encounter summaries
+    calendarEncounterStateJson?: string | null;
   };
   regions: Array<{ name: string; rerollOnSwitch: boolean; regionType: string }>;
   rulesSections: Array<{
@@ -90,6 +99,14 @@ export interface CampaignTransferPayload {
     prerequisiteDice?: string | null;
     prerequisiteMin?: number | null;
     prerequisiteMax?: number | null;
+    // Stateful / in-progress roll state — carried across export/import/duplicate
+    // so a mid-session transfer doesn't lose the current or forecast result.
+    lastResult?: number | null;
+    lastModifiedResult?: number | null;
+    forecastResult?: number | null;
+    forecastModifiedResult?: number | null;
+    forecastDate?: string | null;
+    forecastOutcome?: string | null;
     rows: Array<{ min: number; max: number; outcome: string }>;
     regionNames: string[];
     modifiers: Array<{
@@ -122,6 +139,18 @@ export interface CampaignTransferPayload {
     moons: Array<{ name: string; cycleLength: number; referenceNewMoon: string }>;
   } | null;
   calendarNotes: Array<{ date: string; content: string }>;
+  // moonId is resolved to moonName (moon names are unique within a config);
+  // re-resolved to a new moonId after moons are recreated on import.
+  calendarEvents: Array<{
+    title: string;
+    description?: string | null;
+    recurrence: string;
+    anchorDate: string;
+    endDate?: string | null;
+    moonName?: string | null;
+    moonPhase?: string | null;
+    color: string;
+  }>;
   flags: Array<{
     label: string;
     color: string;
@@ -135,6 +164,32 @@ export interface CampaignTransferPayload {
     encounterTurnsJson: string;
   } | null;
   lightSourceTypes: Array<{ name: string; defaultDuration: number; sortOrder: number }>;
+  // NpcAffiliation names are not DB-unique, but the only creation path
+  // (POST /api/npc-affiliation) dedupes by (campaignId, name) before insert,
+  // so names are effectively unique per campaign in practice — safe to join by name.
+  npcAffiliations: Array<{ name: string }>;
+  savedNpcs: Array<{
+    name?: string | null;
+    gender: string;
+    age?: string | null;
+    type?: string | null;
+    typeLabel: string;
+    secondaryType?: string | null;
+    secondaryTypeLabel?: string | null;
+    physicalJson: string;
+    personalityJson: string;
+    detailsJson: string;
+    isDeceased: boolean;
+    isPinned: boolean;
+    notes?: string | null;
+    isCombatant: boolean;
+    combatAc?: number | null;
+    combatHd?: string | null;
+    combatMaxHp?: number | null;
+    combatAttackBonus?: number | null;
+    combatAttackDamage?: string | null;
+    affiliationName?: string | null;
+  }>;
 }
 
 /**
@@ -150,6 +205,14 @@ export function serializeCampaign(
 
   const regionIdToName = new Map<string, string>(
     campaign.regions.map((r) => [r.id, r.name])
+  );
+
+  const affiliationIdToName = new Map<string, string>(
+    campaign.npcAffiliations.map((a) => [a.id, a.name])
+  );
+
+  const moonIdToName = new Map<string, string>(
+    (campaign.calendarConfig?.moons ?? []).map((m) => [m.id, m.name])
   );
 
   const defaultReactionTableName = campaign.defaultReactionTableId
@@ -189,6 +252,9 @@ export function serializeCampaign(
       currentDungeonRegionName: campaign.state?.currentDungeonRegionId
         ? (regionIdToName.get(campaign.state.currentDungeonRegionId) ?? null)
         : null,
+      todayWeatherJson: campaign.state?.todayWeatherJson ?? null,
+      encounterPanelStateJson: campaign.state?.encounterPanelStateJson ?? null,
+      calendarEncounterStateJson: campaign.state?.calendarEncounterStateJson ?? null,
     },
     regions: campaign.regions.map((r) => ({
       name: r.name,
@@ -219,6 +285,12 @@ export function serializeCampaign(
       prerequisiteDice: t.prerequisiteDice,
       prerequisiteMin: t.prerequisiteMin,
       prerequisiteMax: t.prerequisiteMax,
+      lastResult: t.lastResult,
+      lastModifiedResult: t.lastModifiedResult,
+      forecastResult: t.forecastResult,
+      forecastModifiedResult: t.forecastModifiedResult,
+      forecastDate: t.forecastDate,
+      forecastOutcome: t.forecastOutcome,
       rows: t.rows.map((r) => ({ min: r.min, max: r.max, outcome: r.outcome })),
       regionNames: t.regions.map((tr) => tr.region.name),
       modifiers: t.modifiers.map((m) => ({
@@ -274,6 +346,16 @@ export function serializeCampaign(
       date: n.date,
       content: n.content,
     })),
+    calendarEvents: campaign.calendarEvents.map((e) => ({
+      title: e.title,
+      description: e.description,
+      recurrence: e.recurrence,
+      anchorDate: e.anchorDate,
+      endDate: e.endDate,
+      moonName: e.moonId ? (moonIdToName.get(e.moonId) ?? null) : null,
+      moonPhase: e.moonPhase,
+      color: e.color,
+    })),
     flags: campaign.flags.map((f) => ({
       label: f.label,
       color: f.color,
@@ -292,6 +374,31 @@ export function serializeCampaign(
       name: ls.name,
       defaultDuration: ls.defaultDuration,
       sortOrder: ls.sortOrder,
+    })),
+    npcAffiliations: campaign.npcAffiliations.map((a) => ({ name: a.name })),
+    savedNpcs: campaign.savedNpcs.map((n) => ({
+      name: n.name,
+      gender: n.gender,
+      age: n.age,
+      type: n.type,
+      typeLabel: n.typeLabel,
+      secondaryType: n.secondaryType,
+      secondaryTypeLabel: n.secondaryTypeLabel,
+      physicalJson: n.physicalJson,
+      personalityJson: n.personalityJson,
+      detailsJson: n.detailsJson,
+      isDeceased: n.isDeceased,
+      isPinned: n.isPinned,
+      notes: n.notes,
+      isCombatant: n.isCombatant,
+      combatAc: n.combatAc,
+      combatHd: n.combatHd,
+      combatMaxHp: n.combatMaxHp,
+      combatAttackBonus: n.combatAttackBonus,
+      combatAttackDamage: n.combatAttackDamage,
+      affiliationName: n.affiliationId
+        ? (affiliationIdToName.get(n.affiliationId) ?? null)
+        : null,
     })),
   };
 }
@@ -328,6 +435,9 @@ export async function createCampaignFromData(
           mode: src.state?.mode ?? "OVERLAND",
           currentTime: src.state?.currentTime ?? "12:00 PM",
           forecastingMode: src.state?.forecastingMode ?? false,
+          todayWeatherJson: src.state?.todayWeatherJson ?? null,
+          encounterPanelStateJson: src.state?.encounterPanelStateJson ?? null,
+          calendarEncounterStateJson: src.state?.calendarEncounterStateJson ?? null,
         },
       },
     },
@@ -401,6 +511,12 @@ export async function createCampaignFromData(
         prerequisiteDice: t.prerequisiteDice ?? null,
         prerequisiteMin: t.prerequisiteMin ?? null,
         prerequisiteMax: t.prerequisiteMax ?? null,
+        lastResult: t.lastResult ?? null,
+        lastModifiedResult: t.lastModifiedResult ?? null,
+        forecastResult: t.forecastResult ?? null,
+        forecastModifiedResult: t.forecastModifiedResult ?? null,
+        forecastDate: t.forecastDate ?? null,
+        forecastOutcome: t.forecastOutcome ?? null,
         rows: {
           create: t.rows.map((r) => ({ min: r.min, max: r.max, outcome: r.outcome })),
         },
@@ -494,7 +610,54 @@ export async function createCampaignFromData(
     });
   }
 
+  // ── NPC affiliations ────────────────────────────────────────────────────────
+  // Names aren't DB-unique, but the only creation path dedupes by
+  // (campaignId, name), so joining by name is safe in practice. Guard
+  // against duplicate names in source data anyway by keeping the first.
+  const affiliationNameToId = new Map<string, string>();
+  for (const a of src.npcAffiliations) {
+    if (affiliationNameToId.has(a.name)) continue;
+    const newAffiliation = await tx.npcAffiliation.create({
+      data: { campaignId: newCampaign.id, name: a.name },
+    });
+    affiliationNameToId.set(a.name, newAffiliation.id);
+  }
+
+  // ── Saved NPCs ─────────────────────────────────────────────────────────────
+  for (const n of src.savedNpcs) {
+    await tx.savedNpc.create({
+      data: {
+        campaignId: newCampaign.id,
+        affiliationId: n.affiliationName
+          ? (affiliationNameToId.get(n.affiliationName) ?? null)
+          : null,
+        name: n.name ?? null,
+        gender: n.gender,
+        age: n.age ?? null,
+        type: n.type ?? null,
+        typeLabel: n.typeLabel,
+        secondaryType: n.secondaryType ?? null,
+        secondaryTypeLabel: n.secondaryTypeLabel ?? null,
+        physicalJson: n.physicalJson,
+        personalityJson: n.personalityJson,
+        detailsJson: n.detailsJson,
+        isDeceased: n.isDeceased,
+        isPinned: n.isPinned,
+        notes: n.notes ?? null,
+        isCombatant: n.isCombatant,
+        combatAc: n.combatAc ?? null,
+        combatHd: n.combatHd ?? null,
+        combatMaxHp: n.combatMaxHp ?? null,
+        combatAttackBonus: n.combatAttackBonus ?? null,
+        combatAttackDamage: n.combatAttackDamage ?? null,
+      },
+    });
+  }
+
   // ── Calendar config ────────────────────────────────────────────────────────
+  // Moon names are unique within a config, so calendar events (below) can
+  // re-resolve their moonName back to the newly generated moon id.
+  const moonNameToId = new Map<string, string>();
   if (src.calendarConfig) {
     const cc = src.calendarConfig;
     const newConfig = await tx.calendarConfig.create({
@@ -509,7 +672,7 @@ export async function createCampaignFromData(
     });
 
     for (const moon of cc.moons) {
-      await tx.moon.create({
+      const newMoon = await tx.moon.create({
         data: {
           configId: newConfig.id,
           name: moon.name,
@@ -517,6 +680,7 @@ export async function createCampaignFromData(
           referenceNewMoon: moon.referenceNewMoon,
         },
       });
+      moonNameToId.set(moon.name, newMoon.id);
     }
   }
 
@@ -527,6 +691,23 @@ export async function createCampaignFromData(
         campaignId: newCampaign.id,
         date: note.date,
         content: note.content,
+      },
+    });
+  }
+
+  // ── Calendar events ────────────────────────────────────────────────────────
+  for (const event of src.calendarEvents) {
+    await tx.calendarEvent.create({
+      data: {
+        campaignId: newCampaign.id,
+        title: event.title,
+        description: event.description ?? null,
+        recurrence: event.recurrence,
+        anchorDate: event.anchorDate,
+        endDate: event.endDate ?? null,
+        moonId: event.moonName ? (moonNameToId.get(event.moonName) ?? null) : null,
+        moonPhase: event.moonPhase ?? null,
+        color: event.color,
       },
     });
   }

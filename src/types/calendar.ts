@@ -66,3 +66,21 @@ export interface CalendarNote {
   date: CalendarDateString;
   content: string; // TipTap JSON
 }
+
+export type EventRecurrence = "ONCE" | "ANNUAL" | "MONTHLY" | "MOON_PHASE";
+
+export interface CalendarEvent {
+  id: string;
+  campaignId: string;
+  title: string;
+  description: string | null;
+  recurrence: EventRecurrence;
+  // "YYYY-MM-DD" — for ONCE: the date; for ANNUAL: month+day used, year ignored;
+  // for MONTHLY: day-of-month used.
+  anchorDate: CalendarDateString;
+  // Inclusive end date for multi-day ONCE events; null = single day.
+  endDate: CalendarDateString | null;
+  moonId: string | null;
+  moonPhase: MoonPhase | null;
+  color: string;
+}
