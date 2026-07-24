@@ -11,6 +11,8 @@ const updateSchema = z.object({
   currentTime: z.string().optional(),
   currentDungeonRegionId: z.string().nullable().optional(),
   forecastingMode: z.boolean().optional(),
+  encounterPanelStateJson: z.string().nullable().optional(),
+  calendarEncounterStateJson: z.string().nullable().optional(),
 });
 
 export async function PATCH(request: NextRequest) {
@@ -23,7 +25,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { campaignId, currentRegionId, currentDate, mode, currentTime, currentDungeonRegionId, forecastingMode } = parsed.data;
+  const { campaignId, currentRegionId, currentDate, mode, currentTime, currentDungeonRegionId, forecastingMode, encounterPanelStateJson, calendarEncounterStateJson } = parsed.data;
 
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign || campaign.userId !== userId) {
@@ -39,6 +41,8 @@ export async function PATCH(request: NextRequest) {
       ...(currentTime !== undefined ? { currentTime } : {}),
       ...(currentDungeonRegionId !== undefined ? { currentDungeonRegionId } : {}),
       ...(forecastingMode !== undefined ? { forecastingMode } : {}),
+      ...(encounterPanelStateJson !== undefined ? { encounterPanelStateJson } : {}),
+      ...(calendarEncounterStateJson !== undefined ? { calendarEncounterStateJson } : {}),
     },
     create: {
       campaignId,
@@ -48,6 +52,8 @@ export async function PATCH(request: NextRequest) {
       currentTime: currentTime ?? "12:00 PM",
       currentDungeonRegionId: currentDungeonRegionId ?? null,
       forecastingMode: forecastingMode ?? false,
+      encounterPanelStateJson: encounterPanelStateJson ?? null,
+      calendarEncounterStateJson: calendarEncounterStateJson ?? null,
     },
     include: { currentRegion: true },
   });

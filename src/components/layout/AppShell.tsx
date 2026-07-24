@@ -28,13 +28,17 @@ function isCompatibleWithMode(tableApplicableModes: string | null, currentMode: 
   return tableApplicableModes === currentMode;
 }
 
-function loadEncounterState(campaignId: string, mode: string): EncounterPersistedState {
-  if (typeof window === "undefined") return EMPTY_ENCOUNTER;
-  try {
-    const raw = localStorage.getItem(`dm-encounter:${campaignId}:${mode}`);
-    if (raw) return JSON.parse(raw) as EncounterPersistedState;
-  } catch {}
-  return EMPTY_ENCOUNTER;
+function parseEncounterPanelState(json: string | null | undefined): { OVERLAND: EncounterPersistedState; DUNGEON: EncounterPersistedState } {
+  if (json) {
+    try {
+      const parsed = JSON.parse(json) as { OVERLAND?: EncounterPersistedState; DUNGEON?: EncounterPersistedState };
+      return {
+        OVERLAND: parsed.OVERLAND ?? EMPTY_ENCOUNTER,
+        DUNGEON: parsed.DUNGEON ?? EMPTY_ENCOUNTER,
+      };
+    } catch {}
+  }
+  return { OVERLAND: EMPTY_ENCOUNTER, DUNGEON: EMPTY_ENCOUNTER };
 }
 
 interface Campaign {
@@ -59,6 +63,8 @@ interface Campaign {
     currentTime: string;
     currentDungeonRegionId: string | null;
     forecastingMode: boolean;
+    encounterPanelStateJson: string | null;
+    calendarEncounterStateJson: string | null;
     currentRegion: { id: string; name: string; rerollOnSwitch: boolean; regionType: string } | null;
   } | null;
   regions: { id: string; name: string; rerollOnSwitch: boolean; regionType: string }[];
@@ -90,24 +96,26 @@ export default function AppShell({ campaign, allCampaigns, initialFlags }: AppSh
   const [combatPrefill, setCombatPrefill] = useState<{ name: string; count: number } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const [overlandEncounter, setOverlandEncounter] = useState<EncounterPersistedState>(EMPTY_ENCOUNTER);
-  const [dungeonEncounter, setDungeonEncounter] = useState<EncounterPersistedState>(EMPTY_ENCOUNTER);
+  // Initialize directly from the server-rendered value — same on server and client, so no SSR mismatch
+  const initialEncounterPanelState = parseEncounterPanelState(campaign.state?.encounterPanelStateJson);
+  const [overlandEncounter, setOverlandEncounter] = useState<EncounterPersistedState>(initialEncounterPanelState.OVERLAND);
+  const [dungeonEncounter, setDungeonEncounter] = useState<EncounterPersistedState>(initialEncounterPanelState.DUNGEON);
   const encounterWindows = parseEncounterWindows(campaign.encounterWindowsJson);
 
-  // Load persisted encounter state after hydration to avoid SSR/client mismatch
+  // Persist encounter panel state to the DB (debounced) so it survives reload and follows to other devices
   useEffect(() => {
-    setOverlandEncounter(loadEncounterState(campaign.id, "OVERLAND"));
-    setDungeonEncounter(loadEncounterState(campaign.id, "DUNGEON"));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    try { localStorage.setItem(`dm-encounter:${campaign.id}:OVERLAND`, JSON.stringify(overlandEncounter)); } catch {}
-  }, [overlandEncounter]);
-
-  useEffect(() => {
-    try { localStorage.setItem(`dm-encounter:${campaign.id}:DUNGEON`, JSON.stringify(dungeonEncounter)); } catch {}
-  }, [dungeonEncounter]);
+    const timeout = setTimeout(() => {
+      fetch("/api/campaign-state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignId: campaign.id,
+          encounterPanelStateJson: JSON.stringify({ OVERLAND: overlandEncounter, DUNGEON: dungeonEncounter }),
+        }),
+      }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [overlandEncounter, dungeonEncounter, campaign.id]);
 
   async function handleModeChange(newMode: ExplorationMode) {
     setMode(newMode);
@@ -284,6 +292,7 @@ export default function AppShell({ campaign, allCampaigns, initialFlags }: AppSh
                 onEncounterTableOverrideChange={setEncounterTableOverrideId}
                 initialCollapsed={mode === "DUNGEON"}
                 initialForecastingMode={campaign.state?.forecastingMode ?? false}
+                initialCalendarEncounterState={campaign.state?.calendarEncounterStateJson ?? null}
                 onSendToCombat={(name, count) => {
                   setCombatPrefill({ name, count });
                   handleModeChange("COMBAT");

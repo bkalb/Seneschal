@@ -34,19 +34,14 @@ import {
 import { computeAllMoonPhases } from "@/lib/calendar/moon";
 import { extractCombatantInfo } from "@/lib/combat-prefill";
 
-function saveCalendarEncounter(campaignId: string, date: string, slot: "day" | "night", enc: EncounterSummary | null) {
+// Parse the DB-backed calendar encounter summaries. Date-keyed: a slot is only used
+// if the stored date matches the current date, so stale summaries from a previous day are ignored.
+function parseCalendarEncounter(json: string | null | undefined, date: string, slot: "day" | "night"): EncounterSummary | null {
+  if (!json) return null;
   try {
-    const key = `dm-cal-enc:${campaignId}:${date}:${slot}`;
-    if (enc) localStorage.setItem(key, JSON.stringify(enc));
-    else localStorage.removeItem(key);
-  } catch {}
-}
-
-function loadCalendarEncounter(campaignId: string, date: string, slot: "day" | "night"): EncounterSummary | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(`dm-cal-enc:${campaignId}:${date}:${slot}`);
-    return raw ? (JSON.parse(raw) as EncounterSummary) : null;
+    const parsed = JSON.parse(json) as { date: string; day: EncounterSummary | null; night: EncounterSummary | null };
+    if (parsed.date !== date) return null;
+    return (slot === "day" ? parsed.day : parsed.night) ?? null;
   } catch {}
   return null;
 }
@@ -60,10 +55,11 @@ interface Props {
   onEncounterTableOverrideChange: (id: string | null) => void;
   initialCollapsed?: boolean;
   initialForecastingMode?: boolean;
+  initialCalendarEncounterState?: string | null;
   onSendToCombat?: (name: string, count: number) => void;
 }
 
-export function CalendarPanel({ campaignId, currentDate: initialDate, currentRegionId, regions, encounterTableOverrideId, onEncounterTableOverrideChange, initialCollapsed = false, initialForecastingMode = false, onSendToCombat }: Props) {
+export function CalendarPanel({ campaignId, currentDate: initialDate, currentRegionId, regions, encounterTableOverrideId, onEncounterTableOverrideChange, initialCollapsed = false, initialForecastingMode = false, initialCalendarEncounterState = null, onSendToCombat }: Props) {
   const [calendarCollapsed, setCalendarCollapsed] = useState(initialCollapsed);
   const { data: config, isLoading: configLoading } = useCalendarConfig(campaignId);
   const { data: notes = [] } = useCalendarNotes(campaignId);
@@ -78,8 +74,8 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [dailyRolls, setDailyRolls] = useState<DailyRollResult[] | null>(null);
   const [forecastRolls, setForecastRolls] = useState<DailyRollResult[] | null>(null);
-  const [dayEncounter, setDayEncounter] = useState<EncounterSummary | null>(() => loadCalendarEncounter(campaignId, initialDate, "day"));
-  const [nightEncounter, setNightEncounter] = useState<EncounterSummary | null>(() => loadCalendarEncounter(campaignId, initialDate, "night"));
+  const [dayEncounter, setDayEncounter] = useState<EncounterSummary | null>(() => parseCalendarEncounter(initialCalendarEncounterState, initialDate, "day"));
+  const [nightEncounter, setNightEncounter] = useState<EncounterSummary | null>(() => parseCalendarEncounter(initialCalendarEncounterState, initialDate, "night"));
   const [forecastingMode, setForecastingMode] = useState(initialForecastingMode);
 
   // Inline date-jump state
@@ -106,7 +102,7 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
       .then(({ todayRolls, forecastRolls, dayEncounter: newDay, nightEncounter: newNight }) => {
         if (todayRolls.length > 0) setDailyRolls(todayRolls);
         if (forecastRolls.length > 0) setForecastRolls(forecastRolls);
-        // Don't overwrite encounters already restored from localStorage
+        // Don't overwrite encounters already restored from the DB
         if (newDay) setDayEncounter(prev => prev ?? newDay);
         if (newNight) setNightEncounter(prev => prev ?? newNight);
       })
@@ -161,15 +157,21 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
     if (restored.length > 0) setDailyRolls(restored);
   }, [calendarTables.length]);
 
-  // Persist encounter summaries to localStorage so they survive page refreshes.
-  // Keyed by date so stale encounters from previous days are naturally ignored.
+  // Persist encounter summaries to the DB (debounced) so they survive page refreshes and follow to other devices.
+  // Keyed by date so stale encounters from previous days are naturally ignored on restore.
   useEffect(() => {
-    saveCalendarEncounter(campaignId, currentDate, "day", dayEncounter);
-  }, [dayEncounter, currentDate]);
-
-  useEffect(() => {
-    saveCalendarEncounter(campaignId, currentDate, "night", nightEncounter);
-  }, [nightEncounter, currentDate]);
+    const timeout = setTimeout(() => {
+      fetch("/api/campaign-state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignId,
+          calendarEncounterStateJson: JSON.stringify({ date: currentDate, day: dayEncounter, night: nightEncounter }),
+        }),
+      }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [dayEncounter, nightEncounter, currentDate, campaignId]);
 
   const updateTableMutation = useUpdateTable(campaignId);
 

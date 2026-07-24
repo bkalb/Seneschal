@@ -127,6 +127,10 @@ model CampaignState {
   forecastingMode       Boolean  @default(false)
   // JSON array of today's weather rolls: [{ tableId, tableName, outcome, roll }]
   todayWeatherJson      String?
+  // JSON: { OVERLAND?: EncounterPersistedState, DUNGEON?: EncounterPersistedState } — encounter panel last roll per mode
+  encounterPanelStateJson String?
+  // JSON: { date, day: EncounterSummary | null, night: EncounterSummary | null } — calendar day/night encounter summaries
+  calendarEncounterStateJson String?
   updatedAt             DateTime @updatedAt
 }
 
