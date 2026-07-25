@@ -14,31 +14,21 @@ import {
 } from "@/hooks/useSavedNpcs";
 import type { SavedNpcData, NpcAffiliationData } from "@/types/savedNpc";
 import type { GeneratedNpc } from "@/types/npc";
+import { makeSavedNpc } from "@/test/fixtures";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const CAMPAIGN = "camp1";
 
-const mockNpc: SavedNpcData = {
+const mockNpc: SavedNpcData = makeSavedNpc({
   id: "npc1",
   campaignId: CAMPAIGN,
-  affiliationId: null,
   name: "Aldric",
-  gender: "male",
   age: "34",
   type: "Ruislip",
-  typeLabel: "Homeland",
-  secondaryType: null,
-  secondaryTypeLabel: null,
   physical: ["Tall"],
   personality: ["Brave"],
-  details: [],
-  isDeceased: false,
-  isPinned: false,
-  notes: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
+});
 
 const mockAff: NpcAffiliationData = {
   id: "aff1",

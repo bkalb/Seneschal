@@ -80,11 +80,12 @@ function makeTable(id: string, overrides: Partial<RandomTable> = {}): RandomTabl
     npcForGender: null,
     applicableModes: "BOTH",
     sortOrder: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    prerequisiteDice: null,
+    prerequisiteMin: null,
+    prerequisiteMax: null,
     rows: [{ id: "r1", tableId: id, min: 1, max: 6, outcome: "Rolled Result" }],
     modifiers: [],
-    regions: [],
+    regionIds: [],
     ...overrides,
   };
 }

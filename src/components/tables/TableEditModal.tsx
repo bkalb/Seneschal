@@ -248,11 +248,11 @@ export function TableEditModal({ table, campaignId, regions, seasons, onClose, o
         min: min as number,
         max: max as number,
         outcome: outcome.trim(),
-      })) as any,
+      })),
       modifiers: modifiers.map(({ _key: _k, extraConfig, ...mod }) => ({
         ...mod,
         extraConfig: extraConfig ? JSON.stringify(extraConfig) : null,
-      })) as any,
+      })),
     });
     onClose();
   }

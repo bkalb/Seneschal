@@ -62,20 +62,21 @@ export function TableImportWizard({ campaignId, category, regions, seasons, onCl
     if (!isValidDiceExpression(diceExpression)) return;
 
     const threshold = surpriseThreshold.trim() ? parseInt(surpriseThreshold.trim(), 10) : null;
+    // Note: POST /api/random-tables (createSchema) has no `seasonName` field — season
+    // selection here was already a no-op server-side prior to this cleanup. Season
+    // filtering can be configured afterward via TableEditModal, which does support it.
     await createMutation.mutateAsync({
-      campaignId,
       name: tableName.trim(),
       category,
       diceExpression,
       isStateful,
       rollOnDayAdvance,
-      seasonName: selectedSeasons.length > 0 ? selectedSeasons.join(",") : null,
       rows: preview.rows,
       modifiers: [],
       regionIds: selectedRegionIds,
       surpriseDice: surpriseDice.trim() || null,
       surpriseThreshold: threshold,
-    } as any);
+    });
 
     onClose();
   }

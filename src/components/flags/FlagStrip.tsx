@@ -121,7 +121,7 @@ export function FlagStrip({ campaignId, initialFlags }: Props) {
         <FlagEditModal
           onSave={async (data) => {
             try {
-              await createMutation.mutateAsync(data as any);
+              await createMutation.mutateAsync(data);
               setShowNew(false);
             } catch {
               toast.error("Failed to create flag");

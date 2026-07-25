@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Restore today's weather from CampaignState
-  const todayWeatherJson = (campaign.state as any)?.todayWeatherJson ?? null;
+  const todayWeatherJson = campaign.state?.todayWeatherJson ?? null;
   let todayRolls: RollResult[] = todayWeatherJson ? JSON.parse(todayWeatherJson) : [];
 
   // Load calendar config to compute dates and seasons
@@ -228,7 +228,7 @@ export async function GET(request: NextRequest) {
         : await prisma.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
       const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
 
-      const windows = parseEncounterWindows((campaign as any).encounterWindowsJson ?? "[]");
+      const windows = parseEncounterWindows(campaign.encounterWindowsJson);
 
       const rollParams = {
         table: encounterTable,

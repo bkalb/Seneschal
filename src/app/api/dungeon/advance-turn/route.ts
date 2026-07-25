@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
         : await prisma.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
       const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
 
-      const windows = parseEncounterWindows((campaign as any).encounterWindowsJson ?? "[]");
+      const windows = parseEncounterWindows(campaign.encounterWindowsJson);
       const window = windows.find((w) => {
         // find the window that covers newTime
         const mins = parseTime(newTime);

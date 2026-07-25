@@ -11,6 +11,9 @@ export interface CampaignFlag {
   sortOrder: number;
 }
 
+/** Payload for creating/editing a flag (see `createSchema` in `src/app/api/flags/route.ts`). */
+export type FlagInput = Omit<CampaignFlag, "id" | "campaignId" | "sortOrder">;
+
 export function useFlags(campaignId: string) {
   return useQuery<CampaignFlag[]>({
     queryKey: ["flags", campaignId],
@@ -26,13 +29,7 @@ export function useFlags(campaignId: string) {
 export function useCreateFlag(campaignId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: {
-      label: string;
-      color: string;
-      counter?: number | null;
-      countDirection?: "up" | "down" | null;
-      paused?: boolean;
-    }) => {
+    mutationFn: async (data: FlagInput) => {
       const res = await fetch("/api/flags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -2,31 +2,24 @@ import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import type { SavedNpcData, NpcAffiliationData } from "@/types/savedNpc";
+import { makeSavedNpc } from "@/test/fixtures";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const CAMPAIGN_ID = "camp1";
 
-const mockNpc: SavedNpcData = {
+const mockNpc: SavedNpcData = makeSavedNpc({
   id: "npc1",
   campaignId: CAMPAIGN_ID,
-  affiliationId: null,
   name: "Aldric",
-  gender: "male",
   age: "34",
   type: "Ruislip",
-  typeLabel: "Homeland",
   secondaryType: "Fighter",
   secondaryTypeLabel: "Class",
   physical: ["Tall", "Blonde"],
   personality: ["Brave"],
   details: [{ label: "Weapon", value: "Longsword" }],
-  isDeceased: false,
-  isPinned: false,
-  notes: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
+});
 
 const mockAff: NpcAffiliationData = {
   id: "aff1",

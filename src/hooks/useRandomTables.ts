@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { RandomTable, TableRollResult, TableCategory } from "@/types/table";
+import type { RandomTable, TableRollResult, TableCategory, CreateTableInput, UpdateTableInput } from "@/types/table";
 import { useRollHistoryStore } from "@/stores/rollHistoryStore";
 
 async function fetchTables(campaignId: string, category?: TableCategory): Promise<RandomTable[]> {
@@ -22,7 +22,7 @@ export function useRandomTables(campaignId: string, category?: TableCategory) {
 export function useCreateTable(campaignId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: Omit<RandomTable, "id" | "sortOrder" | "lastResult"> & { rows: RandomTable["rows"]; modifiers: RandomTable["modifiers"]; regionIds: string[] }) => {
+    mutationFn: async (data: CreateTableInput) => {
       const res = await fetch("/api/random-tables", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -44,7 +44,7 @@ export function useCreateTable(campaignId: string) {
 export function useUpdateTable(campaignId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...data }: Partial<RandomTable> & { id: string }) => {
+    mutationFn: async ({ id, ...data }: UpdateTableInput) => {
       const res = await fetch(`/api/random-tables/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

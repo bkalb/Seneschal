@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       : await prisma.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
     const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
 
-    const windows = parseEncounterWindows((campaign as any).encounterWindowsJson ?? "[]");
+    const windows = parseEncounterWindows(campaign.encounterWindowsJson);
 
     const rollParams = {
       table: encounterTable,

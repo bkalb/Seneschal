@@ -58,6 +58,11 @@ export interface RandomTable {
   isStateful: boolean;
   lastResult: number | null;
   lastModifiedResult: number | null;
+  // Forecasting: pre-rolled result for the *next* day (populated when forecastingMode is on)
+  forecastResult: number | null;
+  forecastModifiedResult: number | null;
+  forecastDate: string | null;      // "YYYY-MM-DD" in the campaign's calendar
+  forecastOutcome: string | null;
   rollOnDayAdvance: boolean;
   seasonName: string | null;
   rollWhenNoSeason: RollWhenNoSeason;
@@ -78,6 +83,51 @@ export interface RandomTable {
   modifiers: TableModifier[];
   regionIds: string[];
 }
+
+// ── Draft (pre-persist) input types ──────────────────────────────────────────
+// Rows/modifiers as sent to the server before they have server-assigned ids.
+
+export type TableRowInput = Omit<TableRow, "id" | "tableId">;
+
+/**
+ * Wire shape for a modifier in a PATCH /api/random-tables/[id] request (see
+ * `updateSchema` there). `id` is optional and currently unused by the PATCH
+ * handler (which replaces the whole modifiers set), but kept optional here so
+ * callers may carry it through for local list-diffing without a cast.
+ * `extraConfig` is serialized to a JSON string on the wire, not the parsed object.
+ */
+export type TableModifierInput = Omit<TableModifier, "id" | "tableId" | "extraConfig"> & {
+  id?: string;
+  extraConfig?: string | null;
+};
+
+/** Modifier behaviors accepted by POST /api/random-tables (`createSchema` there omits PREV_RESULT_CONDITION). */
+export type CreateTableModifierInput = Omit<TableModifierInput, "behavior"> & {
+  behavior: Exclude<ModifierBehavior, "PREV_RESULT_CONDITION">;
+};
+
+/** Payload accepted by POST /api/random-tables (see `createSchema` there). `campaignId` is supplied by the hook. */
+export interface CreateTableInput {
+  name: string;
+  category: TableCategory;
+  diceExpression: string;
+  isStateful?: boolean;
+  rollOnDayAdvance?: boolean;
+  rows: TableRowInput[];
+  modifiers?: CreateTableModifierInput[];
+  regionIds?: string[];
+  surpriseDice?: string | null;
+  surpriseThreshold?: number | null;
+  npcForType?: string | null;
+  npcForGender?: string | null;
+}
+
+/** Payload accepted by PATCH /api/random-tables/[id] (see `updateSchema` there). */
+export type UpdateTableInput = Partial<Omit<RandomTable, "rows" | "modifiers">> & {
+  id: string;
+  rows?: TableRowInput[];
+  modifiers?: TableModifierInput[];
+};
 
 // ── Dice engine types ─────────────────────────────────────────────────────────
 

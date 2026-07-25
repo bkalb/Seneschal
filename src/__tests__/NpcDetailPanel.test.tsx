@@ -6,31 +6,26 @@ import { setupServer } from "msw/node";
 import React from "react";
 import { NpcDetailPanel } from "@/components/npc/NpcDetailPanel";
 import type { SavedNpcData, NpcAffiliationData } from "@/types/savedNpc";
+import { makeSavedNpc } from "@/test/fixtures";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const CAMPAIGN = "camp1";
 
-const mockNpc: SavedNpcData = {
+const mockNpc: SavedNpcData = makeSavedNpc({
   id: "npc1",
   campaignId: CAMPAIGN,
   affiliationId: "aff1",
   name: "Aldric",
-  gender: "male",
   age: "34",
   type: "Ruislip",
-  typeLabel: "Homeland",
   secondaryType: "Fighter",
   secondaryTypeLabel: "Class",
   physical: ["Tall", "Blonde"],
   personality: ["Brave"],
   details: [{ label: "Weapon", value: "Longsword" }],
-  isDeceased: false,
-  isPinned: false,
   notes: "Main antagonist",
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
+});
 
 const affiliations: NpcAffiliationData[] = [
   { id: "aff1", campaignId: CAMPAIGN, name: "Bogrim's Bandits", createdAt: new Date().toISOString() },

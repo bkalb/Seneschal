@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
   const config = campaign.calendarConfig;
   const currentDateStr = campaign.state?.currentDate ?? "0001-01-01";
   const currentDate = parseDate(currentDateStr);
-  const forecastingMode = (campaign.state as any)?.forecastingMode ?? false;
+  const forecastingMode = campaign.state?.forecastingMode ?? false;
 
   const calConfig = {
     id: config.id,
@@ -245,7 +245,7 @@ export async function POST(request: NextRequest) {
         : await prisma.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
       const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
 
-      const windows = parseEncounterWindows((campaign as any).encounterWindowsJson ?? "[]");
+      const windows = parseEncounterWindows(campaign.encounterWindowsJson);
 
       const rollParams = {
         table: encounterTable,

@@ -6,6 +6,7 @@ import { setupServer } from "msw/node";
 import React from "react";
 import { NpcBrowser } from "@/components/npc/NpcBrowser";
 import type { SavedNpcData, NpcAffiliationData } from "@/types/savedNpc";
+import { makeSavedNpc } from "@/test/fixtures";
 
 // Mock react-virtual: jsdom has no layout engine, so virtualizer returns zero
 // items without this. We replace it with a simple pass-through that renders all rows.
@@ -27,27 +28,7 @@ vi.mock("@tanstack/react-virtual", () => ({
 const CAMPAIGN = "camp1";
 
 function makeNpc(overrides: Partial<SavedNpcData> = {}): SavedNpcData {
-  return {
-    id: `npc-${Math.random()}`,
-    campaignId: CAMPAIGN,
-    affiliationId: null,
-    name: "Aldric",
-    gender: "male",
-    age: "34",
-    type: "Ruislip",
-    typeLabel: "Homeland",
-    secondaryType: null,
-    secondaryTypeLabel: null,
-    physical: [],
-    personality: [],
-    details: [],
-    isDeceased: false,
-    isPinned: false,
-    notes: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    ...overrides,
-  };
+  return makeSavedNpc({ campaignId: CAMPAIGN, ...overrides });
 }
 
 const mockAff: NpcAffiliationData = {

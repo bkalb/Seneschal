@@ -1,24 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import type { CampaignFlag } from "@/hooks/useFlags";
+import type { CampaignFlag, FlagInput } from "@/hooks/useFlags";
 import { FLAG_COLORS } from "./FlagStrip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface SaveData {
-  label: string;
-  color: string;
-  counter: number | null;
-  countDirection: "up" | "down" | null;
-  paused: boolean;
-}
-
 interface Props {
   flag?: CampaignFlag;
-  onSave: (data: SaveData) => Promise<void>;
+  onSave: (data: FlagInput) => Promise<void>;
   onDelete?: () => Promise<void>;
   onClose: () => void;
 }
