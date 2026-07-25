@@ -21,6 +21,7 @@ import {
   parseDate,
   formatDate,
   yearLength,
+  getIntercalaryDay,
 } from "./engine";
 import { computeMoonPhase } from "./moon";
 
@@ -75,12 +76,17 @@ function eventOccursOnDate(
       return abs >= startAbs && abs <= endAbs;
     }
     case "ANNUAL": {
+      // Intercalary days have a `day` number that extends past the end of
+      // their month; guard against a coincidental numeric match against an
+      // anchor day that was never meant to refer to one.
+      if (getIntercalaryDay(date, config)) return false;
       const anchor = parseDate(event.anchorDate);
       return date.month === anchor.month && date.day === anchor.day;
     }
     case "MONTHLY": {
       // Iterating real calendar days means a nonexistent day (e.g. day 31 in
       // a 28-day month) simply never occurs — short months are skipped for free.
+      if (getIntercalaryDay(date, config)) return false;
       const anchor = parseDate(event.anchorDate);
       return date.day === anchor.day;
     }

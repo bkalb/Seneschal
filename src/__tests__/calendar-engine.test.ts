@@ -10,6 +10,7 @@ import {
   advanceDate,
   getCurrentSeason,
   firstWeekdayOfMonth,
+  getIntercalaryDay,
 } from "@/lib/calendar/engine";
 
 // A minimal 2-month toy calendar, no intercalary days.
@@ -113,19 +114,17 @@ describe("dateToAbsoluteDays / absoluteDaysToDate round-trip", () => {
     expect(absoluteDaysToDate(absFirst, toyConfig)).toEqual(firstOfYear2);
   });
 
-  it("round-trips into and out of an intercalary period", () => {
-    // Intercalary "Festival" (2 days) falls after month 1 (day 10).
-    // absoluteDaysToDate clamps any position inside the intercalary period to
-    // the last real day of the preceding month (per engine.ts comment) —
-    // assert that documented behavior rather than assuming a separate representation.
+  it("round-trips into and out of an intercalary period, representing each day distinctly", () => {
+    // Intercalary "Festival" (2 days) falls after month 1 (day 10). Each day
+    // of the period gets its own CalendarDate: { month: 1, day: 11 } and
+    // { month: 1, day: 12 } (10 + k, 1-based) — NOT a clamp to day 10.
     const lastOfMonth1 = { year: 1, month: 1, day: 10 };
     const absLastOfMonth1 = dateToAbsoluteDays(lastOfMonth1, intercalaryConfig);
 
-    // The two days immediately following month 1's last day are the intercalary days.
-    const icDay0 = absoluteDaysToDate(absLastOfMonth1 + 1, intercalaryConfig);
-    const icDay1 = absoluteDaysToDate(absLastOfMonth1 + 2, intercalaryConfig);
-    expect(icDay0).toEqual({ year: 1, month: 1, day: 10 });
-    expect(icDay1).toEqual({ year: 1, month: 1, day: 10 });
+    const icDay1 = absoluteDaysToDate(absLastOfMonth1 + 1, intercalaryConfig);
+    const icDay2 = absoluteDaysToDate(absLastOfMonth1 + 2, intercalaryConfig);
+    expect(icDay1).toEqual({ year: 1, month: 1, day: 11 });
+    expect(icDay2).toEqual({ year: 1, month: 1, day: 12 });
 
     // The day after the intercalary period is the first day of month 2.
     const afterIc = absoluteDaysToDate(absLastOfMonth1 + 3, intercalaryConfig);
@@ -136,6 +135,73 @@ describe("dateToAbsoluteDays / absoluteDaysToDate round-trip", () => {
     expect(dateToAbsoluteDays({ year: 1, month: 2, day: 1 }, intercalaryConfig)).toBe(
       absLastOfMonth1 + 3
     );
+
+    // And each intercalary CalendarDate maps back to its own distinct abs day.
+    expect(dateToAbsoluteDays(icDay1, intercalaryConfig)).toBe(absLastOfMonth1 + 1);
+    expect(dateToAbsoluteDays(icDay2, intercalaryConfig)).toBe(absLastOfMonth1 + 2);
+  });
+
+  it("getIntercalaryDay identifies intercalary dates and their 1-based index within the period", () => {
+    expect(getIntercalaryDay({ year: 1, month: 1, day: 10 }, intercalaryConfig)).toBeNull(); // last real day
+    expect(getIntercalaryDay({ year: 1, month: 1, day: 11 }, intercalaryConfig)).toEqual({
+      period: intercalaryConfig.intercalary[0],
+      dayIndex: 1,
+    });
+    expect(getIntercalaryDay({ year: 1, month: 1, day: 12 }, intercalaryConfig)).toEqual({
+      period: intercalaryConfig.intercalary[0],
+      dayIndex: 2,
+    });
+    expect(getIntercalaryDay({ year: 1, month: 2, day: 1 }, intercalaryConfig)).toBeNull(); // first real day of next month
+  });
+
+  describe("bijection property: dateToAbsoluteDays(absoluteDaysToDate(n)) === n", () => {
+    const configs: { name: string; config: CalendarConfig }[] = [
+      { name: "no intercalary", config: toyConfig },
+      {
+        name: "1-day intercalary period",
+        config: {
+          ...toyConfig,
+          intercalary: [{ name: "Feast", afterMonth: 1, days: 1, outsideWeeks: true }],
+        },
+      },
+      {
+        name: "multi-day intercalary period (outsideWeeks: true)",
+        config: intercalaryConfig,
+      },
+      {
+        name: "multi-day intercalary period (outsideWeeks: false)",
+        config: {
+          ...intercalaryConfig,
+          intercalary: [{ name: "Festival", afterMonth: 1, days: 3, outsideWeeks: false }],
+        },
+      },
+      {
+        name: "intercalary after the LAST month",
+        config: {
+          ...toyConfig,
+          intercalary: [{ name: "Year's End", afterMonth: 2, days: 2, outsideWeeks: true }],
+        },
+      },
+      {
+        name: "two separate intercalary periods after the SAME month",
+        config: {
+          ...toyConfig,
+          intercalary: [
+            { name: "Spring Rite", afterMonth: 1, days: 2, outsideWeeks: true },
+            { name: "Spring Feast", afterMonth: 1, days: 3, outsideWeeks: false },
+          ],
+        },
+      },
+    ];
+
+    for (const { name, config } of configs) {
+      it(`holds for several thousand consecutive days: ${name}`, () => {
+        for (let abs = 0; abs < 5000; abs++) {
+          const date = absoluteDaysToDate(abs, config);
+          expect(dateToAbsoluteDays(date, config)).toBe(abs);
+        }
+      });
+    }
   });
 });
 
@@ -184,6 +250,25 @@ describe("computeWeekday", () => {
     const idxFirst = intercalaryConfig.weekdays.indexOf(wdFirst);
     expect((idxLast + 1) % intercalaryConfig.weekdays.length).toBe(idxFirst);
   });
+
+  it("outsideWeeks: false — the weekday cycle advances normally through the intercalary period", () => {
+    const advancingConfig: CalendarConfig = {
+      ...intercalaryConfig,
+      intercalary: [{ name: "Festival", afterMonth: 1, days: 2, outsideWeeks: false }],
+    };
+    // Walk day-by-day across the whole period (day 10 -> ic day 11 -> ic day
+    // 12 -> month 2 day 1) and confirm the weekday advances by exactly one
+    // step every time, same as any ordinary day.
+    let d = { year: 1, month: 1, day: 10 };
+    let prevIdx = advancingConfig.weekdays.indexOf(computeWeekday(d, advancingConfig));
+    for (let i = 0; i < 3; i++) {
+      d = advanceDate(d, advancingConfig);
+      const idx = advancingConfig.weekdays.indexOf(computeWeekday(d, advancingConfig));
+      expect(idx).toBe((prevIdx + 1) % advancingConfig.weekdays.length);
+      prevIdx = idx;
+    }
+    expect(d).toEqual({ year: 1, month: 2, day: 1 });
+  });
 });
 
 describe("advanceDate", () => {
@@ -192,14 +277,6 @@ describe("advanceDate", () => {
       year: 1,
       month: 1,
       day: 2,
-    });
-  });
-
-  it("advancing from the last day of a month into an intercalary period clamps to that day (per absoluteDaysToDate)", () => {
-    expect(advanceDate({ year: 1, month: 1, day: 10 }, intercalaryConfig)).toEqual({
-      year: 1,
-      month: 1,
-      day: 10,
     });
   });
 
@@ -219,44 +296,49 @@ describe("advanceDate", () => {
     });
   });
 
-  it("current behavior: advancing from the clamped intercalary representation is a fixed point (does not reach month 2)", () => {
-    // absoluteDaysToDate clamps EVERY day within a multi-day intercalary period
-    // to the same CalendarDate ({month:1, day:10} here) — see engine.ts's
-    // documented clamping behavior. That means dateToAbsoluteDays(clamped) always
-    // maps back to the *last real day's* absolute count, not the specific
-    // intercalary day it came from. So advanceDate(secondIcDay) recomputes the
-    // same "+1" step as advanceDate(firstIcDay) and both return the same clamped
-    // date — advancing never escapes the intercalary period one day at a time.
-    const secondIcDay = absoluteDaysToDate(
-      dateToAbsoluteDays({ year: 1, month: 1, day: 10 }, intercalaryConfig) + 2,
-      intercalaryConfig
-    );
-    expect(secondIcDay).toEqual({ year: 1, month: 1, day: 10 });
-    expect(advanceDate(secondIcDay, intercalaryConfig)).toEqual({
-      year: 1,
-      month: 1,
-      day: 10,
-    });
+  describe("steps through an intercalary period one day at a time and does not get stuck (the frozen-date bug)", () => {
+    for (const n of [1, 2, 3]) {
+      it(`N=${n}: advances through an ${n}-day intercalary period and reaches the next month`, () => {
+        const config: CalendarConfig = {
+          ...intercalaryConfig,
+          intercalary: [{ name: "Festival", afterMonth: 1, days: n, outsideWeeks: true }],
+        };
+        let d = { year: 1, month: 1, day: 10 }; // last real day of month 1
+        const seen: Array<{ year: number; month: number; day: number }> = [d];
+        for (let i = 0; i < n + 1; i++) {
+          d = advanceDate(d, config);
+          seen.push(d);
+        }
+        // Reaches month 2, day 1 — not stuck repeating the same date.
+        expect(d).toEqual({ year: 1, month: 2, day: 1 });
+        // Every intermediate step is a distinct date (no fixed point).
+        const stringified = seen.map((s) => `${s.year}-${s.month}-${s.day}`);
+        expect(new Set(stringified).size).toBe(stringified.length);
+        // Advancing one more day continues normally past the period too.
+        expect(advanceDate(d, config)).toEqual({ year: 1, month: 2, day: 2 });
+      });
+    }
   });
 
-  // BUG: advanceDate should progress one calendar day at a time through a
-  // multi-day intercalary period and eventually reach the first day of the
-  // following month. Expected: advancing twice from the last real day of
-  // month 1 (day 10) through a 2-day intercalary period should land on
-  // {year:1, month:2, day:1}. Actual: because absoluteDaysToDate clamps every
-  // day within the intercalary period to the identical CalendarDate
-  // {month:1,day:10}, re-deriving an absolute day count from that clamped
-  // value via dateToAbsoluteDays always yields the *last real day's* absolute
-  // position, not the specific intercalary day — so advanceDate applied
-  // repeatedly to its own output is a fixed point and can never step past a
-  // multi-day intercalary period. (Single-day intercalary periods are
-  // unaffected since there's nothing to distinguish.)
-  it.skip("BUG: advanceDate should step through a multi-day intercalary period and reach the next month", () => {
-    let d = { year: 1, month: 1, day: 10 };
-    d = advanceDate(d, intercalaryConfig); // -> intercalary day 1 (clamped)
-    d = advanceDate(d, intercalaryConfig); // -> intercalary day 2 (clamped)
-    d = advanceDate(d, intercalaryConfig); // -> should be month 2, day 1
-    expect(d).toEqual({ year: 1, month: 2, day: 1 });
+  it("repeated advancing from a fixed start walks strictly forward across a multi-day period (regression for the freeze)", () => {
+    // This directly reproduces the reported symptom: advancing repeatedly
+    // from the day before a multi-day intercalary period must never return
+    // the same date twice.
+    let d = { year: 1, month: 1, day: 9 };
+    const dates: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      d = advanceDate(d, intercalaryConfig);
+      dates.push(`${d.year}-${d.month}-${d.day}`);
+    }
+    expect(dates).toEqual([
+      "1-1-10", // last real day of month 1
+      "1-1-11", // intercalary day 1
+      "1-1-12", // intercalary day 2
+      "1-2-1", // first real day of month 2
+      "1-2-2",
+      "1-2-3",
+    ]);
+    expect(new Set(dates).size).toBe(dates.length);
   });
 });
 
@@ -293,6 +375,37 @@ describe("getCurrentSeason", () => {
 
   it("returns null when there are no seasons configured", () => {
     expect(getCurrentSeason({ year: 1, month: 1, day: 1 }, toyConfig)).toBeNull();
+  });
+
+  it("an intercalary day inherits the season of the last real day of its preceding month", () => {
+    // fullConfig's Spring runs Mar 1 - May 31. Attach a 2-day intercalary
+    // period after March (the last real day of March, Mar 31, is in Spring).
+    const configWithIc: CalendarConfig = {
+      ...fullConfig,
+      intercalary: [{ name: "Rite of Spring", afterMonth: 3, days: 2, outsideWeeks: true }],
+    };
+    const icDay1 = getIntercalaryDay({ year: 1, month: 3, day: 32 }, configWithIc);
+    const icDay2 = getIntercalaryDay({ year: 1, month: 3, day: 33 }, configWithIc);
+    expect(icDay1).toEqual({ period: configWithIc.intercalary[0], dayIndex: 1 });
+    expect(icDay2).toEqual({ period: configWithIc.intercalary[0], dayIndex: 2 });
+
+    expect(getCurrentSeason({ year: 1, month: 3, day: 32 }, configWithIc)?.name).toBe("Spring");
+    expect(getCurrentSeason({ year: 1, month: 3, day: 33 }, configWithIc)?.name).toBe("Spring");
+    // Sanity: matches the season of Mar 31 itself.
+    expect(getCurrentSeason({ year: 1, month: 3, day: 31 }, configWithIc)?.name).toBe(
+      getCurrentSeason({ year: 1, month: 3, day: 32 }, configWithIc)?.name
+    );
+  });
+
+  it("an intercalary day after a month with no configured season still returns null", () => {
+    // Jun 1 - Nov 30 has no season in fullConfig; an intercalary period after
+    // August (uncovered) should also resolve to null, not throw or match
+    // some unrelated season by coincidence of the day number.
+    const configWithIc: CalendarConfig = {
+      ...fullConfig,
+      intercalary: [{ name: "Dog Days", afterMonth: 8, days: 1, outsideWeeks: true }],
+    };
+    expect(getCurrentSeason({ year: 1, month: 8, day: 32 }, configWithIc)).toBeNull();
   });
 });
 

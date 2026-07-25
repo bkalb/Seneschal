@@ -86,6 +86,64 @@ describe("occurrencesInRange", () => {
   });
 });
 
+describe("occurrencesInRange with intercalary periods", () => {
+  it("MONTHLY event anchored on the last day of a month is not duplicated across the following intercalary period", () => {
+    // Regression test: before the absoluteDaysToDate fix, every day inside a
+    // multi-day intercalary period clamped to the SAME CalendarDate as the
+    // last real day of the preceding month. occurrencesInRange walks abs
+    // days one at a time, so it would revisit that clamped date repeatedly —
+    // making a MONTHLY event anchored on that day appear to fire several
+    // times in a row instead of once. It must now fire exactly once.
+    const withIntercalary: CalendarConfig = {
+      ...config,
+      intercalary: [{ name: "Highsummer", afterMonth: 1, days: 3, outsideWeeks: true }],
+    };
+    const event = makeEvent({ recurrence: "MONTHLY", anchorDate: "0001-01-31" });
+    const occurrences = occurrencesInRange([event], "0001-01-25", "0001-02-05", withIntercalary);
+    expect(occurrences).toHaveLength(1);
+    expect(occurrences[0].date).toBe("0001-01-31");
+  });
+
+  it("ANNUAL event still fires exactly once per year with an intercalary period elsewhere in the calendar", () => {
+    const withIntercalary: CalendarConfig = {
+      ...config,
+      intercalary: [{ name: "Highsummer", afterMonth: 2, days: 3, outsideWeeks: true }],
+    };
+    const event = makeEvent({ recurrence: "ANNUAL", anchorDate: "0001-03-15" });
+    const occurrences = occurrencesInRange([event], "0001-01-01", "0004-04-30", withIntercalary);
+    expect(occurrences).toHaveLength(4);
+    for (const occ of occurrences) {
+      const d = parseDate(occ.date);
+      expect(d.month).toBe(3);
+      expect(d.day).toBe(15);
+    }
+  });
+
+  it("MONTHLY event does not fire on an intercalary day whose day-number coincidentally equals the anchor day", () => {
+    // A 2-month toy calendar: month 1 has only 3 real days, followed by a
+    // 5-day intercalary period, so the period's 2nd day is numerically
+    // "day 5" of month 1 — the same day number as the anchor, even though
+    // it isn't a real day of any month.
+    const tinyConfig: CalendarConfig = {
+      ...config,
+      months: [
+        { name: "Ashmonth", days: 3 },
+        { name: "Birchmonth", days: 31 },
+      ],
+      intercalary: [{ name: "Between-Days", afterMonth: 1, days: 5, outsideWeeks: true }],
+    };
+    const event = makeEvent({ recurrence: "MONTHLY", anchorDate: "0001-01-05" });
+    const occurrences = occurrencesInRange([event], "0001-01-01", "0002-02-10", tinyConfig);
+    expect(occurrences.length).toBeGreaterThan(0);
+    for (const occ of occurrences) {
+      const d = parseDate(occ.date);
+      // Only Birchmonth (month 2) actually has a real day 5.
+      expect(d.month).toBe(2);
+      expect(d.day).toBe(5);
+    }
+  });
+});
+
 describe("nextPhaseDate", () => {
   it("finds the next date matching the requested phase and it agrees with computeMoonPhase", () => {
     const moon = config.moons[0];

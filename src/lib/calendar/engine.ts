@@ -1,4 +1,4 @@
-import type { CalendarDate, CalendarDateString, CalendarConfig, CalendarSeason } from "@/types/calendar";
+import type { CalendarDate, CalendarDateString, CalendarConfig, CalendarSeason, IntercalaryPeriod } from "@/types/calendar";
 
 // ─── Parsing / formatting ─────────────────────────────────────────────────────
 
@@ -70,7 +70,14 @@ export function computeWeekday(date: CalendarDate, config: CalendarConfig): stri
     if (!ic.outsideWeeks) continue;
     // Count how many times this intercalary period falls in [start, end)
     // An intercalary after month M starts at position: sum of months 1..M + prior ics
-    const icStartInYear = daysToEndOfMonth(ic.afterMonth, config);
+    // (+ the days of any earlier intercalary periods that share the same
+    // afterMonth and precede this one in config order — they form one
+    // contiguous combined block, same as absoluteDaysToDate/getIntercalaryDay).
+    const priorSameMonthDays = config.intercalary
+      .slice(0, config.intercalary.indexOf(ic))
+      .filter((o) => o.afterMonth === ic.afterMonth)
+      .reduce((sum, o) => sum + o.days, 0);
+    const icStartInYear = daysToEndOfMonth(ic.afterMonth, config) + priorSameMonthDays;
     const yearsSpanned = end.year - start.year + 1;
     for (let yr = start.year; yr <= end.year; yr++) {
       const icAbsStart = (yr - 1) * yearLength(config) + icStartInYear;
@@ -114,6 +121,14 @@ export function advanceDate(current: CalendarDate, config: CalendarConfig): Cale
 
 /**
  * Convert an absolute day count back to a CalendarDate.
+ *
+ * Intercalary days are represented as day numbers beyond the end of their
+ * preceding month: the k-th day (1-based) of the combined run of intercalary
+ * period(s) after month M is `{ month: M, day: monthDays(M) + k }`. This
+ * keeps `dateToAbsoluteDays` and `absoluteDaysToDate` mutually inverse
+ * (see the "afterMonth" prefix-sum in dateToAbsoluteDays, which already
+ * treats intercalary days this way) rather than lossily clamping every
+ * intercalary day to the same CalendarDate.
  */
 export function absoluteDaysToDate(abs: number, config: CalendarConfig): CalendarDate {
   const yl = yearLength(config);
@@ -127,28 +142,62 @@ export function absoluteDaysToDate(abs: number, config: CalendarConfig): Calenda
     }
     remaining -= monthDays;
 
-    // Check for intercalary after this month
-    for (const ic of config.intercalary) {
-      if (ic.afterMonth === m) {
-        if (remaining < ic.days) {
-          // We're inside an intercalary period — treat as the last day of the prior month
-          // by clamping to the last real day (intercalary days aren't in a "month")
-          return { year, month: m, day: config.months[m - 1].days };
-        }
-        remaining -= ic.days;
-      }
+    // Combined run of intercalary day(s) after this month (there may be more
+    // than one period with the same afterMonth — they're treated as one
+    // contiguous block of days, in config array order, matching the prefix
+    // sum dateToAbsoluteDays uses).
+    const icTotal = config.intercalary.reduce(
+      (sum, ic) => (ic.afterMonth === m ? sum + ic.days : sum),
+      0
+    );
+    if (remaining < icTotal) {
+      return { year, month: m, day: monthDays + remaining + 1 };
     }
+    remaining -= icTotal;
   }
 
   // Fallback: last day of year
   return { year, month: config.months.length, day: config.months[config.months.length - 1].days };
 }
 
+/**
+ * Returns the intercalary period and 1-based day index within that period if
+ * `date` falls inside one (i.e. `date.day` extends past the end of its
+ * month), else null.
+ */
+export function getIntercalaryDay(
+  date: CalendarDate,
+  config: CalendarConfig
+): { period: IntercalaryPeriod; dayIndex: number } | null {
+  const month = config.months[date.month - 1];
+  if (!month) return null;
+
+  let offset = date.day - month.days; // 1-based position within the combined intercalary block
+  if (offset <= 0) return null;
+
+  for (const ic of config.intercalary) {
+    if (ic.afterMonth !== date.month) continue;
+    if (offset <= ic.days) {
+      return { period: ic, dayIndex: offset };
+    }
+    offset -= ic.days;
+  }
+  return null; // beyond all intercalary days after this month — not a valid date
+}
+
 // ─── Season ───────────────────────────────────────────────────────────────────
 
 export function getCurrentSeason(date: CalendarDate, config: CalendarConfig): CalendarSeason | null {
+  // Intercalary days aren't part of any month, so they'd fall outside every
+  // season's month/day range by construction. Inherit the season of the
+  // last real day of the preceding month instead.
+  const ic = getIntercalaryDay(date, config);
+  const effectiveDate: CalendarDate = ic
+    ? { year: date.year, month: date.month, day: config.months[date.month - 1].days }
+    : date;
+
   for (const season of config.seasons) {
-    if (isDateInSeason(date, season)) return season;
+    if (isDateInSeason(effectiveDate, season)) return season;
   }
   return null;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { CalendarNote, CalendarEvent, EventRecurrence, MoonPhase } from "@/types/calendar";
+import type { CalendarNote, CalendarEvent, EventRecurrence, MoonPhase, CalendarDate, CalendarConfig } from "@/types/calendar";
 import {
   useCalendarConfig,
   useCalendarNotes,
@@ -35,6 +35,7 @@ import {
   computeWeekday,
   getCurrentSeason,
   firstWeekdayOfMonth,
+  getIntercalaryDay,
 } from "@/lib/calendar/engine";
 import { computeAllMoonPhases } from "@/lib/calendar/moon";
 import { occurrencesInRange, upcomingEvents, type EventOccurrence } from "@/lib/calendar/events";
@@ -74,6 +75,20 @@ function extractPlainText(tiptapJson: string): string {
   } catch {
     return tiptapJson;
   }
+}
+
+// Human-readable label + weekday for a date, aware of intercalary days: an
+// intercalary day isn't "day N" of its host month (its `day` number just
+// extends past the month's real length), so it gets the period's name
+// instead. "Outside weeks" periods have no meaningful weekday.
+function describeCalendarDate(date: CalendarDate, config: CalendarConfig): { label: string; weekday: string } {
+  const ic = getIntercalaryDay(date, config);
+  if (ic) {
+    const label = ic.period.days > 1 ? `${ic.period.name} — Day ${ic.dayIndex} of ${ic.period.days}` : ic.period.name;
+    return { label, weekday: ic.period.outsideWeeks ? "" : computeWeekday(date, config) };
+  }
+  const monthName = config.months[date.month - 1]?.name ?? `Month ${date.month}`;
+  return { label: `${monthName} ${date.day}`, weekday: computeWeekday(date, config) };
 }
 
 // Parse the DB-backed calendar encounter summaries. Date-keyed: a slot is only used
@@ -317,7 +332,7 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
   }
 
   const currentParsed = parseDate(currentDate);
-  const weekday = computeWeekday(currentParsed, config);
+  const { label: currentDateLabel, weekday } = describeCalendarDate(currentParsed, config);
   const season = getCurrentSeason(currentParsed, config);
   const moonPhases = computeAllMoonPhases(currentParsed, config);
   const monthName = config.months[viewMonth - 1]?.name ?? `Month ${viewMonth}`;
@@ -328,9 +343,16 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
   const noteDateSet = new Set(notes.map((n) => n.date));
   const isCurrentMonth = viewYear === currentParsed.year && viewMonth === currentParsed.month;
 
-  // Event occurrences for the visible month, grouped by date for the grid pips.
+  // Intercalary period(s) that follow the visible month, in config order —
+  // rendered as their own block below the weekday grid since they aren't
+  // part of the weekly structure.
+  const icPeriodsAfterMonth = config.intercalary.filter((ic) => ic.afterMonth === viewMonth);
+  const totalIcDaysAfterMonth = icPeriodsAfterMonth.reduce((sum, ic) => sum + ic.days, 0);
+
+  // Event occurrences for the visible month (including any trailing
+  // intercalary days), grouped by date for the grid pips.
   const firstOfMonth = formatDate({ year: viewYear, month: viewMonth, day: 1 });
-  const lastOfMonth = formatDate({ year: viewYear, month: viewMonth, day: daysInMonth });
+  const lastOfMonth = formatDate({ year: viewYear, month: viewMonth, day: daysInMonth + totalIcDaysAfterMonth });
   const monthOccurrences = occurrencesInRange(events, firstOfMonth, lastOfMonth, config);
   const occurrencesByDate = new Map<string, EventOccurrence[]>();
   for (const occ of monthOccurrences) {
@@ -455,8 +477,7 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
               <div className="flex items-center gap-1.5">
                 <p className="text-sm font-semibold">
                   {weekday && <span className="text-muted-foreground font-normal">{weekday}, </span>}
-                  {config.months[currentParsed.month - 1]?.name ?? `Month ${currentParsed.month}`}{" "}
-                  {currentParsed.day}, Year {currentParsed.year}
+                  {currentDateLabel}, Year {currentParsed.year}
                 </p>
                 <button
                   onClick={openDateEditor}
@@ -680,6 +701,73 @@ export function CalendarPanel({ campaignId, currentDate: initialDate, currentReg
             );
           })}
         </div>
+
+        {/* Intercalary days — outside the weekly structure, so they're not
+            slotted into weekday columns; rendered as their own labeled row(s)
+            below the month grid instead. */}
+        {icPeriodsAfterMonth.length > 0 && (() => {
+          let dayOffset = daysInMonth;
+          return icPeriodsAfterMonth.map((period) => {
+            const periodStartOffset = dayOffset;
+            dayOffset += period.days;
+            return (
+              <div key={period.name + periodStartOffset} className="mt-1.5 pt-1.5 border-t border-dashed border-border/60">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium px-0.5 mb-0.5">
+                  {period.name}
+                </p>
+                <div className="flex flex-wrap gap-0.5">
+                  {Array.from({ length: period.days }).map((_, i) => {
+                    const day = periodStartOffset + i + 1;
+                    const dateStr = formatDate({ year: viewYear, month: viewMonth, day });
+                    const isToday =
+                      viewYear === currentParsed.year &&
+                      viewMonth === currentParsed.month &&
+                      day === currentParsed.day;
+                    const hasNote = noteDateSet.has(dateStr);
+                    const dayEvents = occurrencesByDate.get(dateStr) ?? [];
+                    const dayMoonPhases = computeAllMoonPhases({ year: viewYear, month: viewMonth, day }, config);
+
+                    return (
+                      <button
+                        key={day}
+                        onClick={() => setSelectedDate(dateStr)}
+                        title={[period.name, dayEvents.length > 0 ? dayEvents.map((o) => o.event.title).join(", ") : null].filter(Boolean).join(" — ")}
+                        style={{ width: `calc(${100 / numWeekdays}% - 0.125rem)` }}
+                        className={[
+                          "relative flex flex-col items-center rounded border border-dashed border-border/70 py-0.5 text-[11px] transition-colors hover:bg-muted min-h-[32px] gap-0.5",
+                          isToday ? "bg-primary/15 text-primary font-semibold ring-1 ring-primary/40" : "text-muted-foreground",
+                        ].join(" ")}
+                      >
+                        <span>{i + 1}</span>
+                        {dayMoonPhases.length > 0 && (
+                          <div className="flex gap-px">
+                            {dayMoonPhases.map((mp) => (
+                              <MoonPhaseIcon key={mp.moon.id} phase={mp.phase} size={10} />
+                            ))}
+                          </div>
+                        )}
+                        {dayEvents.length > 0 && (
+                          <div className="flex gap-px absolute bottom-0.5 left-1/2 -translate-x-1/2">
+                            {dayEvents.slice(0, 3).map((occ) => (
+                              <span
+                                key={occ.event.id}
+                                className="w-1 h-1 rounded-full"
+                                style={{ backgroundColor: occ.event.color }}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {hasNote && (
+                          <span className="absolute bottom-0.5 right-0.5 w-1 h-1 rounded-full bg-primary/60" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          });
+        })()}
       </div>
 
       {/* Upcoming events */}
@@ -905,8 +993,7 @@ interface DayDetailProps {
 
 function DayDetailSheet({ campaignId, date, currentDate, config, notes, onClose, onDateChange }: DayDetailProps) {
   const parsed = parseDate(date);
-  const weekday = computeWeekday(parsed, config);
-  const monthName = config.months[parsed.month - 1]?.name ?? `Month ${parsed.month}`;
+  const { label: dateLabel, weekday } = describeCalendarDate(parsed, config);
   const existing = notes[0] ?? null;
   const isToday = date === currentDate;
 
@@ -944,7 +1031,7 @@ function DayDetailSheet({ campaignId, date, currentDate, config, notes, onClose,
           <div className="flex items-center gap-3">
             <p className="font-semibold text-sm">
               {weekday && <span className="text-muted-foreground font-normal">{weekday}, </span>}
-              {monthName} {parsed.day}, Year {parsed.year}
+              {dateLabel}, Year {parsed.year}
             </p>
             {!isToday && (
               <button
