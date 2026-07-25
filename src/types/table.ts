@@ -32,7 +32,6 @@ export interface TableModifier {
 }
 
 export type ModifierExtraConfig =
-  | { type: "override_outcome"; outcomeText: string }
   | { type: "prev_result_condition"; operator: "lte" | "gte" | "eq"; threshold: number };
 
 // ── Table rows ────────────────────────────────────────────────────────────────

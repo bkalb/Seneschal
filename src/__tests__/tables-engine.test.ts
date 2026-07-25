@@ -148,53 +148,6 @@ describe("rollOnTable — modifier adjustments shift the matched row", () => {
   });
 });
 
-// The `override_outcome` ModifierExtraConfig variant is defined in
-// src/types/table.ts but rollOnTable (and modifier-resolver.ts) never reads
-// `outcomeText` anywhere — it's an unimplemented/dead branch of the type.
-describe("rollOnTable — extraConfig override_outcome", () => {
-  it("current behavior: an override_outcome modifier has no effect on the resolved outcome text", () => {
-    const mod: TableModifier = {
-      id: "m1",
-      tableId: "table1",
-      label: "Override",
-      behavior: "ALWAYS",
-      rollAdjustment: 0,
-      extraConfig: { type: "override_outcome", outcomeText: "Overridden!" },
-      autoRegionIds: [],
-      conditionalRegionIds: [],
-    };
-    const table = makeTable({ modifiers: [mod] });
-    stubRandom(0); // -> 1, matches r1 "Low"
-    const result = rollOnTable(table, null, ["m1"]);
-    expect(result.matchedRow.outcome).toBe("Low");
-    expect(result.resolvedOutcome.expandedText).toBe("Low");
-  });
-
-  // BUG: per the type comment and T4.4 spec intent, an active `override_outcome`
-  // modifier is expected to replace the resolved outcome text with
-  // `extraConfig.outcomeText`. Actual: neither modifier-resolver.ts nor
-  // engine.ts ever reads `outcomeText` — grep for "outcomeText" in src/ shows
-  // it referenced only in the type definition (src/types/table.ts:35). The
-  // feature is entirely unimplemented; toggling such a modifier only
-  // contributes its `rollAdjustment` (here 0) like any other ALWAYS modifier.
-  it.skip("BUG: override_outcome should replace the resolved outcome text", () => {
-    const mod: TableModifier = {
-      id: "m1",
-      tableId: "table1",
-      label: "Override",
-      behavior: "ALWAYS",
-      rollAdjustment: 0,
-      extraConfig: { type: "override_outcome", outcomeText: "Overridden!" },
-      autoRegionIds: [],
-      conditionalRegionIds: [],
-    };
-    const table = makeTable({ modifiers: [mod] });
-    stubRandom(0);
-    const result = rollOnTable(table, null, ["m1"]);
-    expect(result.resolvedOutcome.expandedText).toBe("Overridden!");
-  });
-});
-
 describe("rollOnTable — prerequisite roll", () => {
   it("a passing prerequisite roll proceeds to roll the main table", () => {
     const table = makeTable({ prerequisiteDice: "1d6", prerequisiteMin: 1, prerequisiteMax: 3 });
