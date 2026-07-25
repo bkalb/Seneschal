@@ -42,54 +42,91 @@ describe("scanAndRollInlineNotation — multiple notations", () => {
 });
 
 describe("scanAndRollInlineNotation — richer Tier 3.3 grammar", () => {
-  // The inline-notation regexes here (CONST_OP_DICE / DICE_OP_CONST in
-  // outcome-expander.ts) both require an explicit leading count digit before
-  // "d" (`\d+d\d+`) and have no kh/kl suffix support at all — a narrower
-  // grammar than roller.ts's parseDiceExpression, which accepts bare `dM`,
-  // `d%`, and `kh`/`kl`. Document the ACTUAL (narrower) behavior here.
-
-  it("current behavior: 1d6+2 (leading count present) IS recognized with its flat modifier", () => {
+  it("1d6+2 (leading count present) is recognized with its flat modifier", () => {
     vi.spyOn(Math, "random").mockReturnValue(0); // 1d6 -> 1, +2 modifier -> 3
     const result = scanAndRollInlineNotation("Deals 1d6+2 damage");
     expect(result.inlineRolls).toEqual([{ notation: "1d6+2", result: 3 }]);
     expect(result.expandedText).toBe("Deals 3 damage");
   });
+});
 
-  it("current behavior: bare d% (no leading count) is NOT recognized and passes through unrolled", () => {
-    const result = scanAndRollInlineNotation("Roll d% for treasure");
-    expect(result.inlineRolls).toEqual([]);
-    expect(result.expandedText).toBe("Roll d% for treasure");
+// Helper: makes Math.random return a fixed sequence of values, one per call,
+// cycling if exhausted. Used to produce distinguishable dice rolls so kh/kl
+// keep semantics can be asserted precisely rather than just bounds-checked.
+function mockSequentialRandom(values: number[]) {
+  let i = 0;
+  return vi.spyOn(Math, "random").mockImplementation(() => {
+    const v = values[i % values.length];
+    i++;
+    return v;
   });
+}
 
-  it("current behavior: bare d20 (no leading count) is NOT recognized and passes through unrolled", () => {
+describe("scanAndRollInlineNotation — bug fix: grammar single-sourced from roller.ts", () => {
+  // outcome-expander.ts's CONST_OP_DICE / DICE_OP_CONST are now built from
+  // roller.ts's exported DICE_BODY_SOURCE, so bare `dM`, `d%`, `Nd%`, and the
+  // `kh`/`kl` keep suffix are recognized here exactly as parseDiceExpression
+  // recognizes them. This replaces the old it.skip("BUG: ...") placeholder.
+
+  it("bare d20 (no leading count) is recognized and rolled", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // 1d20 -> 1
     const result = scanAndRollInlineNotation("Roll d20 to hit");
-    expect(result.inlineRolls).toEqual([]);
-    expect(result.expandedText).toBe("Roll d20 to hit");
+    expect(result.inlineRolls).toEqual([{ notation: "d20", result: 1 }]);
+    expect(result.expandedText).toBe("Roll 1 to hit");
   });
 
-  it("current behavior: 4d6kh3's kh3 suffix is ignored — only the bare '4d6' prefix is matched and rolled without keep-highest", () => {
-    vi.spyOn(Math, "random").mockReturnValue(0); // all 4 dice -> 1 each, summed (not kept-3) -> 4
+  it("uppercase bare D20 is recognized case-insensitively", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const result = scanAndRollInlineNotation("Roll D20 to hit");
+    expect(result.inlineRolls).toEqual([{ notation: "D20", result: 1 }]);
+    expect(result.expandedText).toBe("Roll 1 to hit");
+  });
+
+  it("bare d% (100 sides, no leading count) is recognized and rolled", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // 1d100 -> 1
+    const result = scanAndRollInlineNotation("Roll d% for treasure");
+    expect(result.inlineRolls).toEqual([{ notation: "d%", result: 1 }]);
+    expect(result.expandedText).toBe("Roll 1 for treasure");
+  });
+
+  it("Nd% (explicit count, 100 sides) is recognized and rolled", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // each 1d100 -> 1, summed -> 2
+    const result = scanAndRollInlineNotation("Roll 2d% for gold");
+    expect(result.inlineRolls).toEqual([{ notation: "2d%", result: 2 }]);
+    expect(result.expandedText).toBe("Roll 2 for gold");
+  });
+
+  it("4d6kh3 applies keep-highest-3 semantics and leaves no stray 'kh3' in the output", () => {
+    // rolls in order: 1, 2, 3, 4 -> kh3 drops the lowest (1) -> kept [2,3,4] -> total 9
+    mockSequentialRandom([0, 0.17, 0.34, 0.51]);
     const result = scanAndRollInlineNotation("Stat: 4d6kh3");
-    expect(result.inlineRolls).toEqual([{ notation: "4d6", result: 4 }]);
-    expect(result.expandedText).toBe("Stat: 4kh3");
+    expect(result.inlineRolls).toEqual([{ notation: "4d6kh3", result: 9 }]);
+    expect(result.expandedText).toBe("Stat: 9");
+    expect(result.expandedText).not.toContain("kh3");
   });
 
-  // BUG: per the T4.4 spec and roller.ts's full dice grammar, inline outcome
-  // text should recognize bare `dM` (e.g. "d20"), `d%`, and the `kh`/`kl`
-  // keep-highest/lowest suffix, the same as parseDiceExpression does. Actual:
-  // CONST_OP_DICE and DICE_OP_CONST in outcome-expander.ts both hard-require
-  // a leading digit count (`\d+d\d+`) and never look for a trailing
-  // `kh`/`kl` group, so "d20", "d%", and the "kh3" in "4d6kh3" are silently
-  // dropped/ignored instead of rolled per the full grammar.
-  it.skip("BUG: bare d20, d%, and kh/kl suffixes should be recognized like parseDiceExpression's grammar", () => {
-    const d20 = scanAndRollInlineNotation("Roll d20 to hit");
-    expect(d20.inlineRolls).toEqual([{ notation: "d20", result: expect.any(Number) }]);
+  it("4d6kl2 applies keep-lowest-2 semantics", () => {
+    // same rolls [1,2,3,4] -> kl2 keeps the two lowest [1,2] -> total 3
+    mockSequentialRandom([0, 0.17, 0.34, 0.51]);
+    const result = scanAndRollInlineNotation("Stat: 4d6kl2");
+    expect(result.inlineRolls).toEqual([{ notation: "4d6kl2", result: 3 }]);
+    expect(result.expandedText).toBe("Stat: 3");
+  });
 
-    const pct = scanAndRollInlineNotation("Roll d% for treasure");
-    expect(pct.inlineRolls).toEqual([{ notation: "d%", result: expect.any(Number) }]);
+  it("kh with no explicit number defaults to keeping 1", () => {
+    // same rolls [1,2,3,4] -> kh (default 1) keeps only the highest [4] -> total 4
+    mockSequentialRandom([0, 0.17, 0.34, 0.51]);
+    const result = scanAndRollInlineNotation("Stat: 4d6kh");
+    expect(result.inlineRolls).toEqual([{ notation: "4d6kh", result: 4 }]);
+    expect(result.expandedText).toBe("Stat: 4");
+  });
 
-    const kh = scanAndRollInlineNotation("Stat: 4d6kh3");
-    expect(kh.inlineRolls).toEqual([{ notation: "4d6kh3", result: expect.any(Number) }]);
+  it("uppercase 4D6KH3 is recognized case-insensitively with the same keep semantics", () => {
+    mockSequentialRandom([0, 0.17, 0.34, 0.51]);
+    const result = scanAndRollInlineNotation("Stat: 4D6KH3");
+    expect(result.inlineRolls).toEqual([{ notation: "4D6KH3", result: 9 }]);
+    expect(result.expandedText).toBe("Stat: 9");
+    expect(result.expandedText).not.toContain("KH3");
   });
 });
 
@@ -111,6 +148,84 @@ describe("scanAndRollInlineNotation — no false positives", () => {
     const result = scanAndRollInlineNotation("A hidden door requires 1d4 rounds to force open.");
     expect(result.expandedText).toBe("A hidden door requires 1 rounds to force open.");
     expect(result.inlineRolls).toEqual([{ notation: "1d4", result: 1 }]);
+  });
+});
+
+describe("scanAndRollInlineNotation — no false positives with the widened (bare dM) grammar", () => {
+  // Widening the grammar to allow an empty/optional count (so bare "d20"
+  // matches) risks matching "d" + digits embedded inside ordinary words.
+  // \b does not exist between two word characters, so "d" preceded by
+  // another letter/digit with no boundary should never start a match.
+
+  it("'Fred20' (a word ending in a letter immediately followed by 'd20') is not mangled", () => {
+    const result = scanAndRollInlineNotation("The wizard Fred20 arrives.");
+    expect(result.expandedText).toBe("The wizard Fred20 arrives.");
+    expect(result.inlineRolls).toEqual([]);
+  });
+
+  it("'ID2' (letter immediately before 'd', digit after) is not mangled", () => {
+    const result = scanAndRollInlineNotation("Reference ID2 on the sheet.");
+    expect(result.expandedText).toBe("Reference ID2 on the sheet.");
+    expect(result.inlineRolls).toEqual([]);
+  });
+
+  it("'Round 6' (no 'd' immediately adjacent to the digit) is not mangled", () => {
+    const result = scanAndRollInlineNotation("Round 6 begins.");
+    expect(result.expandedText).toBe("Round 6 begins.");
+    expect(result.inlineRolls).toEqual([]);
+  });
+
+  it("a bare 'd' with digits nowhere nearby is not mangled", () => {
+    const result = scanAndRollInlineNotation("and so it began");
+    expect(result.expandedText).toBe("and so it began");
+    expect(result.inlineRolls).toEqual([]);
+  });
+
+  it("'50% chance' (a percent with no 'd' present) does not produce a roll", () => {
+    const result = scanAndRollInlineNotation("50% chance of rain");
+    expect(result.expandedText).toBe("50% chance of rain");
+    expect(result.inlineRolls).toEqual([]);
+  });
+
+  it("'3d' with no sides digit or '%' after it is not treated as dice notation", () => {
+    const result = scanAndRollInlineNotation("Grade: 3d for now");
+    expect(result.expandedText).toBe("Grade: 3d for now");
+    expect(result.inlineRolls).toEqual([]);
+  });
+});
+
+describe("scanAndRollInlineNotation — overlap and modifier semantics preserved under the widened grammar", () => {
+  it("'24-1d6' still consumes the whole span as one Pattern-A match, no double bare-dice firing", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // 1d6 -> 1
+    const result = scanAndRollInlineNotation("HP: 24-1d6");
+    expect(result.inlineRolls).toEqual([{ notation: "24-1d6", result: 23 }]);
+    expect(result.expandedText).toBe("HP: 23");
+  });
+
+  it("'24-d6' (bare dice inside a constant±dice expression) is a single Pattern-A match, not a double fire", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // 1d6 -> 1
+    const result = scanAndRollInlineNotation("HP: 24-d6");
+    expect(result.inlineRolls).toEqual([{ notation: "24-d6", result: 23 }]);
+    expect(result.expandedText).toBe("HP: 23");
+  });
+
+  it("'2d6-1' consumes the whole span as one roll with the flat modifier applied by the roller", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // 2d6 -> 1+1=2, -1 modifier -> 1
+    const result = scanAndRollInlineNotation("Damage: 2d6-1");
+    expect(result.inlineRolls).toEqual([{ notation: "2d6-1", result: 1 }]);
+    expect(result.expandedText).toBe("Damage: 1");
+  });
+
+  it("PINNED pre-existing (out of scope) behavior: '1d6+2d4' matches only '1d6+2', leaving 'd4' dangling unrolled", () => {
+    // This is the documented, unchanged quirk: the scanner does not treat
+    // "+2d4" as a second independent dice term once "+2" has already been
+    // consumed as a flat modifier on "1d6". Fixing this is explicitly out of
+    // scope for this change; this test only pins the current behavior so a
+    // future change to it is a deliberate, visible decision.
+    vi.spyOn(Math, "random").mockReturnValue(0); // 1d6 -> 1, +2 modifier -> 3
+    const result = scanAndRollInlineNotation("Deals 1d6+2d4 damage");
+    expect(result.inlineRolls).toEqual([{ notation: "1d6+2", result: 3 }]);
+    expect(result.expandedText).toBe("Deals 3d4 damage");
   });
 });
 

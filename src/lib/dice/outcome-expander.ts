@@ -1,13 +1,26 @@
 import type { ResolvedOutcome, InlineRoll } from "@/types/table";
-import { rollExpression } from "./roller";
+import { rollExpression, DICE_BODY_SOURCE } from "./roller";
 
-// Pattern A — constant ± dice:  "24-1d6", "10+2d4"
+// Both scanner patterns are built from roller.ts's DICE_BODY_SOURCE so the
+// grammar recognized in outcome text (bare "d20", "d%", "kh"/"kl" suffixes,
+// etc.) can never drift from parseDiceExpression's grammar again. The body's
+// internal groups are named (count/sides/keepMode/keepCount, see roller.ts)
+// specifically so wrapping it here doesn't shift positional group numbers.
+
+// Pattern A — constant ± dice:  "24-1d6", "10+2d4", "24-d6"
 // The operator binds the leading integer to the dice expression.
-const CONST_OP_DICE = /\b(\d+)([+-])(\d+d\d+)\b/gi;
+const CONST_OP_DICE = new RegExp(
+  String.raw`\b(?<constant>\d+)(?<op>[+-])(?<dice>${DICE_BODY_SOURCE})\b`,
+  "gi"
+);
 
-// Pattern B — dice ± constant, or bare dice:  "1d6+2", "2d6-1", "1d6"
+// Pattern B — dice ± constant, or bare dice:  "1d6+2", "2d6-1", "1d6",
+// "d20", "d%", "4d6kh3", "4d6kl".
 // The optional modifier group captures the sign and value together.
-const DICE_OP_CONST = /\b(\d+d\d+)([+-]\d+)?/gi;
+const DICE_OP_CONST = new RegExp(
+  String.raw`\b(?<dice>${DICE_BODY_SOURCE})(?<modifier>[+-]\d+)?`,
+  "gi"
+);
 
 interface Candidate {
   start: number;
@@ -23,9 +36,10 @@ export function scanAndRollInlineNotation(text: string): ResolvedOutcome {
   CONST_OP_DICE.lastIndex = 0;
   let m: RegExpMatchArray | null;
   while ((m = CONST_OP_DICE.exec(text)) !== null) {
-    const constant = parseInt(m[1], 10);
-    const op = m[2] as "+" | "-";
-    const diceExpr = m[3];
+    const groups = m.groups!;
+    const constant = parseInt(groups.constant, 10);
+    const op = groups.op as "+" | "-";
+    const diceExpr = groups.dice;
     const fullMatch = m[0];
     const start = m.index!;
     candidates.push({
@@ -42,8 +56,9 @@ export function scanAndRollInlineNotation(text: string): ResolvedOutcome {
   // Collect pattern-B matches (dice ± constant, or bare dice)
   DICE_OP_CONST.lastIndex = 0;
   while ((m = DICE_OP_CONST.exec(text)) !== null) {
-    const diceExpr = m[1];
-    const modifierStr = m[2] ?? "";
+    const groups = m.groups!;
+    const diceExpr = groups.dice;
+    const modifierStr = groups.modifier ?? "";
     const fullMatch = diceExpr + modifierStr;
     const start = m.index!;
     candidates.push({

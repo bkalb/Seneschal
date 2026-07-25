@@ -7,18 +7,26 @@ import type { DiceExpression, DiceRollResult } from "@/types/table";
 //   d% / Nd%   — % means 100 sides (d% == 1d100)
 //   NdMkhX     — keep highest X (kh with no number → keep 1)
 //   NdMklX     — keep lowest X (kl with no number → keep 1)
-// group1 count (empty → 1), group2 sides ("%" → 100),
-// group3 keep mode (kh|kl), group4 keep count (empty → 1), group5 flat modifier
-const DICE_PATTERN = /^(\d*)d(\d+|%)(?:(kh|kl)(\d*))?([+-]\d+)?$/i;
+//
+// DICE_BODY_SOURCE is the non-anchored "core" of the grammar — count, "d",
+// sides, and the optional keep suffix — with NAMED capture groups so it can
+// be embedded inside other regexes (see outcome-expander.ts) without their
+// positional group numbering shifting underneath them. This is the single
+// source of truth for the dice grammar; do not hand-copy it elsewhere.
+export const DICE_BODY_SOURCE = String.raw`(?<count>\d*)d(?<sides>\d+|%)(?:(?<keepMode>kh|kl)(?<keepCount>\d*))?`;
+
+// Full expression: the body plus an optional flat modifier, anchored so the
+// whole trimmed string must match (parseDiceExpression rejects trailing junk).
+const DICE_PATTERN = new RegExp(`^${DICE_BODY_SOURCE}(?<modifier>[+-]\\d+)?$`, "i");
 
 const ZERO_EXPRESSION: DiceExpression = { count: 0, sides: 0, raw: "", modifier: 0, keep: null };
 
 export function parseDiceExpression(raw: string): DiceExpression | null {
   const trimmed = raw.trim();
   const match = trimmed.match(DICE_PATTERN);
-  if (!match) return null;
+  if (!match || !match.groups) return null;
 
-  const [, countStr, sidesStr, keepMode, keepCountStr, modifierStr] = match;
+  const { count: countStr, sides: sidesStr, keepMode, keepCount: keepCountStr, modifier: modifierStr } = match.groups;
 
   const count = countStr === "" ? 1 : parseInt(countStr, 10);
   const sides = sidesStr === "%" ? 100 : parseInt(sidesStr, 10);
