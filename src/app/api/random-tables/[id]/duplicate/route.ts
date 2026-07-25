@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
-import { tableInclude } from "@/lib/tables/shape-table";
+import { tableInclude, tableIncludeWithCampaign } from "@/lib/tables/shape-table";
 
 /**
  * POST /api/random-tables/[id]/duplicate
@@ -24,7 +24,7 @@ export async function POST(
 
   const source = await prisma.randomTable.findUnique({
     where: { id },
-    include: { campaign: true, ...tableInclude },
+    include: tableIncludeWithCampaign,
   });
 
   if (!source || source.campaign.userId !== userId) {

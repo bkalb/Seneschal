@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
 import { rollOnTable } from "@/lib/tables/engine";
 import { singularize } from "@/lib/singularize";
+import { shapeTable, tableInclude } from "@/lib/tables/shape-table";
 import type { RandomTable } from "@/types/table";
 
 const createSchema = z.object({
@@ -24,25 +25,6 @@ const createSchema = z.object({
 }).refine((d) => d.maxHp != null || (d.maxHps != null && d.maxHps.length > 0), {
   message: "Either maxHp or maxHps must be provided",
 });
-
-const tableInclude = {
-  rows: { orderBy: { min: "asc" as const } },
-  modifiers: { include: { autoRegions: true, conditionalRegions: true } },
-  regions: { include: { region: true } },
-} as const;
-
-function shapeTable(table: any): RandomTable {
-  return {
-    ...table,
-    regionIds: table.regions.map((r: any) => r.regionId),
-    modifiers: table.modifiers.map((m: any) => ({
-      ...m,
-      extraConfig: m.extraConfig ? JSON.parse(m.extraConfig) : null,
-      autoRegionIds: m.autoRegions.map((r: any) => r.id),
-      conditionalRegionIds: m.conditionalRegions.map((r: any) => r.id),
-    })),
-  };
-}
 
 function rollTraits(table: RandomTable, count: number): string {
   const rolled = Array.from({ length: count }, () =>
