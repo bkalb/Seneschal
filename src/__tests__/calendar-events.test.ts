@@ -142,6 +142,41 @@ describe("occurrencesInRange with intercalary periods", () => {
       expect(d.day).toBe(5);
     }
   });
+
+  it("ANNUAL event anchored directly on an intercalary day (e.g. a Midwinter festival) fires every year on that day", () => {
+    // Month 1 = 10 days, a 2-day "Midwinter" intercalary period after it
+    // (days 11 and 12), then month 2 = 10 days. Anchoring an ANNUAL event on
+    // the first Midwinter day is the single most natural use of intercalary
+    // days in a real campaign calendar — it must be reachable.
+    const midwinterConfig: CalendarConfig = {
+      ...config,
+      months: [
+        { name: "First", days: 10 },
+        { name: "Second", days: 10 },
+      ],
+      intercalary: [{ name: "Midwinter", afterMonth: 1, days: 2, outsideWeeks: true }],
+    };
+    const event = makeEvent({ recurrence: "ANNUAL", anchorDate: "0001-01-11" });
+    const occurrences = occurrencesInRange([event], "0001-01-01", "0003-02-10", midwinterConfig);
+    expect(occurrences.map((o) => o.date)).toEqual(["0001-01-11", "0002-01-11", "0003-01-11"]);
+  });
+
+  it("ANNUAL event anchored on a normal day does not fire on an intercalary day", () => {
+    // Sanity check for the other direction: an ordinary anchor (day 5, a
+    // real day of month 1) must not also match the intercalary days that
+    // follow month 1, even though both are compared via date.month/date.day.
+    const midwinterConfig: CalendarConfig = {
+      ...config,
+      months: [
+        { name: "First", days: 10 },
+        { name: "Second", days: 10 },
+      ],
+      intercalary: [{ name: "Midwinter", afterMonth: 1, days: 2, outsideWeeks: true }],
+    };
+    const event = makeEvent({ recurrence: "ANNUAL", anchorDate: "0001-01-05" });
+    const occurrences = occurrencesInRange([event], "0001-01-01", "0002-02-10", midwinterConfig);
+    expect(occurrences.map((o) => o.date)).toEqual(["0001-01-05", "0002-01-05"]);
+  });
 });
 
 describe("nextPhaseDate", () => {

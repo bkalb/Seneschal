@@ -76,10 +76,13 @@ function eventOccursOnDate(
       return abs >= startAbs && abs <= endAbs;
     }
     case "ANNUAL": {
-      // Intercalary days have a `day` number that extends past the end of
-      // their month; guard against a coincidental numeric match against an
-      // anchor day that was never meant to refer to one.
-      if (getIntercalaryDay(date, config)) return false;
+      // No intercalary guard needed here (unlike MONTHLY below): a real
+      // anchor day always satisfies `day <= monthDays(month)`, while an
+      // intercalary date satisfies `day > monthDays(month)`. Since ANNUAL
+      // also requires `date.month === anchor.month`, those two ranges can
+      // never coincide within the same month — so this is also how an
+      // event gets anchored ON an intercalary day (e.g. "Midwinter"),
+      // which is one of the most natural uses of intercalary days.
       const anchor = parseDate(event.anchorDate);
       return date.month === anchor.month && date.day === anchor.day;
     }
