@@ -74,27 +74,29 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const config = await prisma.calendarConfig.upsert({
-    where: { campaignId },
-    create: { campaignId, ...configData },
-    update: configData,
-  });
+  const updated = await prisma.$transaction(async (tx) => {
+    const config = await tx.calendarConfig.upsert({
+      where: { campaignId },
+      create: { campaignId, ...configData },
+      update: configData,
+    });
 
-  // Replace moons entirely
-  await prisma.moon.deleteMany({ where: { configId: config.id } });
-  await prisma.moon.createMany({
-    data: moons.map((m) => ({
-      configId: config.id,
-      name: m.name,
-      cycleLength: m.cycleLength,
-      referenceNewMoon: m.referenceNewMoon,
-    })),
-  });
+    // Replace moons entirely
+    await tx.moon.deleteMany({ where: { configId: config.id } });
+    await tx.moon.createMany({
+      data: moons.map((m) => ({
+        configId: config.id,
+        name: m.name,
+        cycleLength: m.cycleLength,
+        referenceNewMoon: m.referenceNewMoon,
+      })),
+    });
 
-  const updated = await prisma.calendarConfig.findUnique({
-    where: { id: config.id },
-    include: { moons: true },
-  });
+    return tx.calendarConfig.findUnique({
+      where: { id: config.id },
+      include: { moons: true },
+    });
+  }, { timeout: 30000 });
 
   return NextResponse.json(normalizeConfig(updated));
 }

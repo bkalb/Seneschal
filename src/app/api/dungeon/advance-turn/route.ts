@@ -60,13 +60,6 @@ export async function POST(request: NextRequest) {
   const newTotalMinutes = parseTime(currentTime) + minutesPerTurn;
   const newTime = formatTime(newTotalMinutes);
 
-  // Persist new time to campaign state
-  await prisma.campaignState.upsert({
-    where: { campaignId },
-    update: { currentTime: newTime },
-    create: { campaignId, currentTime: newTime },
-  });
-
   // Determine which turn number (1-indexed) within the current hour this is
   const newTotalMinsWrapped = ((Math.round(newTotalMinutes)) % (24 * 60) + 24 * 60) % (24 * 60);
   const minuteInHour = newTotalMinsWrapped % 60;
@@ -75,76 +68,87 @@ export async function POST(request: NextRequest) {
   // Should we roll an encounter this turn?
   const shouldRollEncounter = encounterTurns.includes(turnInHour);
 
-  let encounter: EncounterSummary | null = null;
+  const payload = await prisma.$transaction(async (tx) => {
+    // Persist new time to campaign state
+    await tx.campaignState.upsert({
+      where: { campaignId },
+      update: { currentTime: newTime },
+      create: { campaignId, currentTime: newTime },
+    });
 
-  if (shouldRollEncounter && (encounterTableOverrideId || currentDungeonRegionId)) {
-    const encounterRaw = encounterTableOverrideId
-      ? await prisma.randomTable.findUnique({ where: { id: encounterTableOverrideId }, include: tableInclude })
-      : await prisma.randomTable.findFirst({
-          where: {
-            campaignId,
-            category: "ENCOUNTER",
-            regions: { some: { regionId: currentDungeonRegionId! } },
-          },
-          include: tableInclude,
+    let encounter: EncounterSummary | null = null;
+
+    if (shouldRollEncounter && (encounterTableOverrideId || currentDungeonRegionId)) {
+      const encounterRaw = encounterTableOverrideId
+        ? await tx.randomTable.findUnique({ where: { id: encounterTableOverrideId }, include: tableInclude })
+        : await tx.randomTable.findFirst({
+            where: {
+              campaignId,
+              category: "ENCOUNTER",
+              regions: { some: { regionId: currentDungeonRegionId! } },
+            },
+            include: tableInclude,
+          });
+
+      if (encounterRaw) {
+        const encounterTable = shapeTable(encounterRaw);
+
+        const reactionRaw = campaign.defaultReactionTableId
+          ? await tx.randomTable.findUnique({ where: { id: campaign.defaultReactionTableId }, include: tableInclude })
+          : await tx.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
+        const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
+
+        const windows = parseEncounterWindows(campaign.encounterWindowsJson);
+        const window = windows.find((w) => {
+          // find the window that covers newTime
+          const mins = parseTime(newTime);
+          const start = w.startHour * 60 + w.startMinute;
+          const end = w.endHour * 60 + w.endMinute;
+          return start <= end ? mins >= start && mins < end : mins >= start || mins < end;
+        }) ?? null;
+
+        const result = rollEncounterFull({
+          table: encounterTable,
+          reactionTable,
+          regionId: currentDungeonRegionId,
+          campaignDefaultSurpriseDice: campaign.defaultSurpriseDice,
+          campaignDefaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
         });
 
-    if (encounterRaw) {
-      const encounterTable = shapeTable(encounterRaw);
-
-      const reactionRaw = campaign.defaultReactionTableId
-        ? await prisma.randomTable.findUnique({ where: { id: campaign.defaultReactionTableId }, include: tableInclude })
-        : await prisma.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
-      const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
-
-      const windows = parseEncounterWindows(campaign.encounterWindowsJson);
-      const window = windows.find((w) => {
-        // find the window that covers newTime
-        const mins = parseTime(newTime);
-        const start = w.startHour * 60 + w.startMinute;
-        const end = w.endHour * 60 + w.endMinute;
-        return start <= end ? mins >= start && mins < end : mins >= start || mins < end;
-      }) ?? null;
-
-      const result = rollEncounterFull({
-        table: encounterTable,
-        reactionTable,
-        regionId: currentDungeonRegionId,
-        campaignDefaultSurpriseDice: campaign.defaultSurpriseDice,
-        campaignDefaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
-      });
-
-      encounter = {
-        label: window?.name ?? "Encounter",
-        time: window ? rollEncounterTime(window) : newTime,
-        outcome: result.resolvedOutcome.expandedText,
-        roll: result.diceTotal,
-        reaction: result.reaction ?? null,
-        surprise: result.surprise ?? null,
-        prerequisiteRoll: result.prerequisiteRoll ?? null,
-      };
+        encounter = {
+          label: window?.name ?? "Encounter",
+          time: window ? rollEncounterTime(window) : newTime,
+          outcome: result.resolvedOutcome.expandedText,
+          roll: result.diceTotal,
+          reaction: result.reaction ?? null,
+          surprise: result.surprise ?? null,
+          prerequisiteRoll: result.prerequisiteRoll ?? null,
+        };
+      }
     }
-  }
 
-  // Tick down active light sources that are not paused
-  const activeLights = await prisma.activeLightSource.findMany({
-    where: { campaignId, paused: false },
-  });
-  for (const light of activeLights) {
-    const newRemaining = Math.max(0, light.remainingTurns - 1);
-    await prisma.activeLightSource.update({
-      where: { id: light.id },
-      data: { remainingTurns: newRemaining },
+    // Tick down active light sources that are not paused
+    const activeLights = await tx.activeLightSource.findMany({
+      where: { campaignId, paused: false },
     });
-  }
+    for (const light of activeLights) {
+      const newRemaining = Math.max(0, light.remainingTurns - 1);
+      await tx.activeLightSource.update({
+        where: { id: light.id },
+        data: { remainingTurns: newRemaining },
+      });
+    }
 
-  return NextResponse.json({
-    newTime,
-    turnInHour,
-    turnsPerHour,
-    encounter,
-    expiredLightSourceIds: activeLights
-      .filter((l) => l.remainingTurns === 1) // was 1, now 0
-      .map((l) => l.id),
-  });
+    return {
+      newTime,
+      turnInHour,
+      turnsPerHour,
+      encounter,
+      expiredLightSourceIds: activeLights
+        .filter((l) => l.remainingTurns === 1) // was 1, now 0
+        .map((l) => l.id),
+    };
+  }, { timeout: 30000 });
+
+  return NextResponse.json(payload);
 }

@@ -73,23 +73,6 @@ export async function POST(request: NextRequest) {
   const tomorrowSeason = tomorrowDate ? getCurrentSeason(tomorrowDate, calConfig) : null;
   const tomorrowSeasonName = tomorrowSeason?.name ?? null;
 
-  // Update CampaignState (todayWeatherJson written after rolls are computed — see below)
-  await prisma.campaignState.upsert({
-    where: { campaignId },
-    create: { campaignId, currentDate: newDateStr },
-    update: { currentDate: newDateStr },
-  });
-
-  // ── Weather (CALENDAR tables) ─────────────────────────────────────────────────
-
-  const calendarTables = await prisma.randomTable.findMany({
-    where: { campaignId, category: "CALENDAR", rollOnDayAdvance: true },
-    include: tableInclude,
-  });
-
-  const weatherRolls: { tableId: string; tableName: string; outcome: string; roll: number }[] = [];
-  const forecastRolls: { tableId: string; tableName: string; outcome: string; roll: number }[] = [];
-
   // Helper: does this table pass the region + season filter for a given date/season?
   function tablePassesFilter(raw: any, seasonName: string | null): boolean {
     const regionIds = raw.regions.map((r: any) => r.regionId);
@@ -103,9 +86,6 @@ export async function POST(request: NextRequest) {
     return true;
   }
 
-  // ── Pass 1: today's results ───────────────────────────────────────────────────
-  // Keyed by tableId and by name so tomorrow's pass can find relevant prev results.
-
   // Canonical key for a table's region set: sorted IDs joined, or "" for "all regions".
   function regionSetKey(raw: any): string {
     const ids: string[] = raw.regions.map((r: any) => r.regionId);
@@ -113,193 +93,218 @@ export async function POST(request: NextRequest) {
   }
 
   interface TodayResult { rawDice: number; diceTotal: number; outcome: string }
-  const todayById        = new Map<string, TodayResult>();
-  const todayByRegionSet = new Map<string, TodayResult>(); // season-boundary chain fallback
 
-  for (const raw of calendarTables) {
-    if (!tablePassesFilter(raw, activeSeasonName)) continue;
-
-    const table = shapeTable(raw);
-
-    let rawDice: number, diceTotal: number, outcome: string;
-
-    if (forecastingMode && raw.forecastDate === newDateStr && raw.forecastOutcome != null) {
-      // Consume pre-rolled forecast
-      rawDice  = raw.forecastResult ?? 0;
-      diceTotal = raw.forecastModifiedResult ?? 0;
-      outcome  = raw.forecastOutcome;
-    } else {
-      const result = rollOnTable(table, currentRegionId ?? null, userToggles);
-      rawDice  = result.rawDiceTotal;
-      diceTotal = result.diceTotal;
-      outcome  = result.resolvedOutcome.expandedText;
-    }
-
-    weatherRolls.push({ tableId: raw.id, tableName: raw.name, outcome, roll: diceTotal });
-    todayById.set(raw.id, { rawDice, diceTotal, outcome });
-    todayByRegionSet.set(regionSetKey(raw), { rawDice, diceTotal, outcome });
-
-    // Non-forecasting: persist lastResult as usual
-    if (!forecastingMode) {
-      const needsPersist = raw.isStateful || raw.modifiers.some((m: any) => m.behavior === "PREV_RESULT_CONDITION");
-      if (needsPersist) {
-        await prisma.randomTable.update({
-          where: { id: raw.id },
-          data: { lastResult: rawDice, lastModifiedResult: diceTotal },
-        });
-      }
-    }
-  }
-
-  // Persist today's weather rolls so they can be restored on page reload
-  if (weatherRolls.length > 0) {
-    await prisma.campaignState.update({
+  const payload = await prisma.$transaction(async (tx) => {
+    // Update CampaignState (todayWeatherJson written after rolls are computed — see below)
+    await tx.campaignState.upsert({
       where: { campaignId },
-      data: { todayWeatherJson: JSON.stringify(weatherRolls) },
+      create: { campaignId, currentDate: newDateStr },
+      update: { currentDate: newDateStr },
     });
-  }
 
-  // ── Pass 2: tomorrow's forecast (forecasting mode only) ───────────────────────
-  // Loops over tables valid for TOMORROW independently, so season-boundary tables
-  // (e.g. a Spring table on the last day of Winter) are included even if they
-  // didn't roll today.
+    // ── Weather (CALENDAR tables) ───────────────────────────────────────────────
 
-  if (forecastingMode && tomorrowDateStr) {
+    const calendarTables = await tx.randomTable.findMany({
+      where: { campaignId, category: "CALENDAR", rollOnDayAdvance: true },
+      include: tableInclude,
+    });
+
+    const weatherRolls: { tableId: string; tableName: string; outcome: string; roll: number }[] = [];
+    const forecastRolls: { tableId: string; tableName: string; outcome: string; roll: number }[] = [];
+
+    // ── Pass 1: today's results ─────────────────────────────────────────────────
+    // Keyed by tableId and by name so tomorrow's pass can find relevant prev results.
+
+    const todayById        = new Map<string, TodayResult>();
+    const todayByRegionSet = new Map<string, TodayResult>(); // season-boundary chain fallback
+
     for (const raw of calendarTables) {
-      if (!tablePassesFilter(raw, tomorrowSeasonName)) {
-        // This table doesn't apply to tomorrow. Clear any stale forecast it may hold,
-        // and if it rolled today, persist its lastResult.
-        const todayResult = todayById.get(raw.id);
-        if (todayResult) {
-          await prisma.randomTable.update({
-            where: { id: raw.id },
-            data: {
-              lastResult: todayResult.rawDice,
-              lastModifiedResult: todayResult.diceTotal,
-              forecastResult: null,
-              forecastModifiedResult: null,
-              forecastDate: null,
-              forecastOutcome: null,
-            },
-          });
-        }
-        continue;
-      }
-
-      // Determine the best "previous result" to feed into PREV_RESULT_CONDITION:
-      //   1. Same table rolled today (same tableId) — direct chain (same table, continuous season)
-      //   2. A today-table with the same region set — season-boundary chain
-      //      (e.g. "Western Frankia (Winter)" → "Western Frankia (Spring)", both pinned to Western Frankia)
-      //   3. Fall back to the table's own stored lastModifiedResult
-      const prevToday = todayById.get(raw.id) ?? todayByRegionSet.get(regionSetKey(raw)) ?? null;
-      const prevDiceTotal = prevToday?.diceTotal ?? raw.lastModifiedResult ?? null;
+      if (!tablePassesFilter(raw, activeSeasonName)) continue;
 
       const table = shapeTable(raw);
-      const tableForTomorrow: RandomTable = { ...table, lastModifiedResult: prevDiceTotal };
-      const tomorrowResult = rollOnTable(tableForTomorrow, currentRegionId ?? null, userToggles);
 
-      forecastRolls.push({
-        tableId: raw.id,
-        tableName: raw.name,
-        outcome: tomorrowResult.resolvedOutcome.expandedText,
-        roll: tomorrowResult.diceTotal,
-      });
+      let rawDice: number, diceTotal: number, outcome: string;
 
-      const todayResult = todayById.get(raw.id);
-      await prisma.randomTable.update({
-        where: { id: raw.id },
-        data: {
-          // Persist today's result for tables that rolled today; leave unchanged for others
-          ...(todayResult ? { lastResult: todayResult.rawDice, lastModifiedResult: todayResult.diceTotal } : {}),
-          forecastResult: tomorrowResult.rawDiceTotal,
-          forecastModifiedResult: tomorrowResult.diceTotal,
-          forecastDate: tomorrowDateStr,
-          forecastOutcome: tomorrowResult.resolvedOutcome.expandedText,
-        },
+      if (forecastingMode && raw.forecastDate === newDateStr && raw.forecastOutcome != null) {
+        // Consume pre-rolled forecast
+        rawDice  = raw.forecastResult ?? 0;
+        diceTotal = raw.forecastModifiedResult ?? 0;
+        outcome  = raw.forecastOutcome;
+      } else {
+        const result = rollOnTable(table, currentRegionId ?? null, userToggles);
+        rawDice  = result.rawDiceTotal;
+        diceTotal = result.diceTotal;
+        outcome  = result.resolvedOutcome.expandedText;
+      }
+
+      weatherRolls.push({ tableId: raw.id, tableName: raw.name, outcome, roll: diceTotal });
+      todayById.set(raw.id, { rawDice, diceTotal, outcome });
+      todayByRegionSet.set(regionSetKey(raw), { rawDice, diceTotal, outcome });
+
+      // Non-forecasting: persist lastResult as usual
+      if (!forecastingMode) {
+        const needsPersist = raw.isStateful || raw.modifiers.some((m: any) => m.behavior === "PREV_RESULT_CONDITION");
+        if (needsPersist) {
+          await tx.randomTable.update({
+            where: { id: raw.id },
+            data: { lastResult: rawDice, lastModifiedResult: diceTotal },
+          });
+        }
+      }
+    }
+
+    // Persist today's weather rolls so they can be restored on page reload
+    if (weatherRolls.length > 0) {
+      await tx.campaignState.update({
+        where: { campaignId },
+        data: { todayWeatherJson: JSON.stringify(weatherRolls) },
       });
     }
-  }
 
-  // ── Encounters ────────────────────────────────────────────────────────────────
-  // Only roll if there is an ENCOUNTER table scoped to the current region.
+    // ── Pass 2: tomorrow's forecast (forecasting mode only) ─────────────────────
+    // Loops over tables valid for TOMORROW independently, so season-boundary tables
+    // (e.g. a Spring table on the last day of Winter) are included even if they
+    // didn't roll today.
 
-  let dayEncounter: EncounterSummary | null = null;
-  let nightEncounter: EncounterSummary | null = null;
-  // One entry per configured encounter window (superset of day/night above).
-  let encounters: EncounterSummary[] = [];
+    if (forecastingMode && tomorrowDateStr) {
+      for (const raw of calendarTables) {
+        if (!tablePassesFilter(raw, tomorrowSeasonName)) {
+          // This table doesn't apply to tomorrow. Clear any stale forecast it may hold,
+          // and if it rolled today, persist its lastResult.
+          const todayResult = todayById.get(raw.id);
+          if (todayResult) {
+            await tx.randomTable.update({
+              where: { id: raw.id },
+              data: {
+                lastResult: todayResult.rawDice,
+                lastModifiedResult: todayResult.diceTotal,
+                forecastResult: null,
+                forecastModifiedResult: null,
+                forecastDate: null,
+                forecastOutcome: null,
+              },
+            });
+          }
+          continue;
+        }
 
-  if (encounterTableOverrideId || currentRegionId) {
-    const encounterRaw = encounterTableOverrideId
-      ? await prisma.randomTable.findUnique({ where: { id: encounterTableOverrideId }, include: tableInclude })
-      : await prisma.randomTable.findFirst({
-          where: { campaignId, category: "ENCOUNTER", regions: { some: { regionId: currentRegionId! } } },
-          include: tableInclude,
+        // Determine the best "previous result" to feed into PREV_RESULT_CONDITION:
+        //   1. Same table rolled today (same tableId) — direct chain (same table, continuous season)
+        //   2. A today-table with the same region set — season-boundary chain
+        //      (e.g. "Western Frankia (Winter)" → "Western Frankia (Spring)", both pinned to Western Frankia)
+        //   3. Fall back to the table's own stored lastModifiedResult
+        const prevToday = todayById.get(raw.id) ?? todayByRegionSet.get(regionSetKey(raw)) ?? null;
+        const prevDiceTotal = prevToday?.diceTotal ?? raw.lastModifiedResult ?? null;
+
+        const table = shapeTable(raw);
+        const tableForTomorrow: RandomTable = { ...table, lastModifiedResult: prevDiceTotal };
+        const tomorrowResult = rollOnTable(tableForTomorrow, currentRegionId ?? null, userToggles);
+
+        forecastRolls.push({
+          tableId: raw.id,
+          tableName: raw.name,
+          outcome: tomorrowResult.resolvedOutcome.expandedText,
+          roll: tomorrowResult.diceTotal,
         });
 
-    if (encounterRaw) {
-      const encounterTable = shapeTable(encounterRaw);
-
-      // Reaction table: campaign default → first REACTION table
-      const reactionRaw = campaign.defaultReactionTableId
-        ? await prisma.randomTable.findUnique({ where: { id: campaign.defaultReactionTableId }, include: tableInclude })
-        : await prisma.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
-      const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
-
-      const windows = parseEncounterWindows(campaign.encounterWindowsJson);
-
-      const rollParams = {
-        table: encounterTable,
-        reactionTable,
-        regionId: currentRegionId,
-        campaignDefaultSurpriseDice: campaign.defaultSurpriseDice,
-        campaignDefaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
-      };
-
-      // One roll per configured window. `day`/`night` are kept populated from
-      // window 0 / window 1 for back-compat with existing readers.
-      encounters = rollEncounterForWindows(windows, rollParams);
-      dayEncounter = encounters[0] ?? null;
-      nightEncounter = encounters[1] ?? null;
+        const todayResult = todayById.get(raw.id);
+        await tx.randomTable.update({
+          where: { id: raw.id },
+          data: {
+            // Persist today's result for tables that rolled today; leave unchanged for others
+            ...(todayResult ? { lastResult: todayResult.rawDice, lastModifiedResult: todayResult.diceTotal } : {}),
+            forecastResult: tomorrowResult.rawDiceTotal,
+            forecastModifiedResult: tomorrowResult.diceTotal,
+            forecastDate: tomorrowDateStr,
+            forecastOutcome: tomorrowResult.resolvedOutcome.expandedText,
+          },
+        });
+      }
     }
-  }
 
-  // ── Calendar note ─────────────────────────────────────────────────────────────
+    // ── Encounters ─────────────────────────────────────────────────────────────
+    // Only roll if there is an ENCOUNTER table scoped to the current region.
 
-  const noteNodes = buildDaySummaryNodes({ weatherRolls, dayEncounter, nightEncounter });
+    let dayEncounter: EncounterSummary | null = null;
+    let nightEncounter: EncounterSummary | null = null;
+    // One entry per configured encounter window (superset of day/night above).
+    let encounters: EncounterSummary[] = [];
 
-  if (noteNodes.length > 0) {
-    const existing = await prisma.calendarNote.findFirst({ where: { campaignId, date: newDateStr } });
-    if (existing) {
-      await prisma.calendarNote.update({
-        where: { id: existing.id },
-        data: { content: appendToDoc(existing.content, noteNodes) },
-      });
-    } else {
-      await prisma.calendarNote.create({
-        data: { campaignId, date: newDateStr, content: buildDoc(noteNodes) },
-      });
+    if (encounterTableOverrideId || currentRegionId) {
+      const encounterRaw = encounterTableOverrideId
+        ? await tx.randomTable.findUnique({ where: { id: encounterTableOverrideId }, include: tableInclude })
+        : await tx.randomTable.findFirst({
+            where: { campaignId, category: "ENCOUNTER", regions: { some: { regionId: currentRegionId! } } },
+            include: tableInclude,
+          });
+
+      if (encounterRaw) {
+        const encounterTable = shapeTable(encounterRaw);
+
+        // Reaction table: campaign default → first REACTION table
+        const reactionRaw = campaign.defaultReactionTableId
+          ? await tx.randomTable.findUnique({ where: { id: campaign.defaultReactionTableId }, include: tableInclude })
+          : await tx.randomTable.findFirst({ where: { campaignId, category: "REACTION" }, include: tableInclude });
+        const reactionTable = reactionRaw ? shapeTable(reactionRaw) : null;
+
+        const windows = parseEncounterWindows(campaign.encounterWindowsJson);
+
+        const rollParams = {
+          table: encounterTable,
+          reactionTable,
+          regionId: currentRegionId,
+          campaignDefaultSurpriseDice: campaign.defaultSurpriseDice,
+          campaignDefaultSurpriseThreshold: campaign.defaultSurpriseThreshold,
+        };
+
+        // One roll per configured window. `day`/`night` are kept populated from
+        // window 0 / window 1 for back-compat with existing readers.
+        encounters = rollEncounterForWindows(windows, rollParams);
+        dayEncounter = encounters[0] ?? null;
+        nightEncounter = encounters[1] ?? null;
+      }
     }
-  }
 
-  // ── Flag counters ─────────────────────────────────────────────────────────────
+    // ── Calendar note ───────────────────────────────────────────────────────────
 
-  const flags = await prisma.campaignFlag.findMany({
-    where: { campaignId, paused: false, counter: { not: null }, countDirection: { not: null } },
-  });
-  for (const flag of flags) {
-    const newCounter =
-      flag.countDirection === "up"
-        ? (flag.counter ?? 0) + 1
-        : Math.max(0, (flag.counter ?? 0) - 1);
-    await prisma.campaignFlag.update({ where: { id: flag.id }, data: { counter: newCounter } });
-  }
+    const noteNodes = buildDaySummaryNodes({ weatherRolls, dayEncounter, nightEncounter });
 
-  return NextResponse.json({
-    newDate: newDateStr,
-    dailyRolls: weatherRolls,
-    forecastRolls,
-    dayEncounter,
-    nightEncounter,
-    encounters,
-  });
+    if (noteNodes.length > 0) {
+      const existing = await tx.calendarNote.findFirst({ where: { campaignId, date: newDateStr } });
+      if (existing) {
+        await tx.calendarNote.update({
+          where: { id: existing.id },
+          data: { content: appendToDoc(existing.content, noteNodes) },
+        });
+      } else {
+        await tx.calendarNote.create({
+          data: { campaignId, date: newDateStr, content: buildDoc(noteNodes) },
+        });
+      }
+    }
+
+    // ── Flag counters ───────────────────────────────────────────────────────────
+
+    const flags = await tx.campaignFlag.findMany({
+      where: { campaignId, paused: false, counter: { not: null }, countDirection: { not: null } },
+    });
+    for (const flag of flags) {
+      const newCounter =
+        flag.countDirection === "up"
+          ? (flag.counter ?? 0) + 1
+          : Math.max(0, (flag.counter ?? 0) - 1);
+      await tx.campaignFlag.update({ where: { id: flag.id }, data: { counter: newCounter } });
+    }
+
+    return {
+      newDate: newDateStr,
+      dailyRolls: weatherRolls,
+      forecastRolls,
+      dayEncounter,
+      nightEncounter,
+      encounters,
+    };
+  }, { timeout: 30000 });
+
+  return NextResponse.json(payload);
 }
