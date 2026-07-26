@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
 import { parseDate, formatDate, advanceDate, getCurrentSeason } from "@/lib/calendar/engine";
 import { rollOnTable } from "@/lib/tables/engine";
-import { shapeTable, tableInclude } from "@/lib/tables/shape-table";
+import { shapeTable, tableInclude, type RawTable } from "@/lib/tables/shape-table";
 import { rollEncounterFull, rollEncounterForWindows } from "@/lib/tables/encounter-roll";
 import { parseEncounterWindows } from "@/lib/encounter-timing";
 import { buildDoc, appendToDoc, buildDaySummaryNodes } from "@/lib/calendar/note-builder";
@@ -75,28 +75,21 @@ export async function POST(request: NextRequest) {
   const tomorrowSeasonName = tomorrowSeason?.name ?? null;
 
   // Helper: does this table pass the region + season filter for a given date/season?
-  function tablePassesFilter(raw: any, seasonName: string | null): boolean {
-    const regionIds = raw.regions.map((r: any) => r.regionId);
+  function tablePassesFilter(raw: RawTable, seasonName: string | null): boolean {
+    const regionIds = raw.regions.map((r) => r.regionId);
     if (regionIds.length > 0 && (!currentRegionId || !regionIds.includes(currentRegionId))) return false;
     return seasonFilterPasses(raw, seasonName);
   }
 
   // Canonical key for a table's region set: sorted IDs joined, or "" for "all regions".
-  function regionSetKey(raw: any): string {
-    const ids: string[] = raw.regions.map((r: any) => r.regionId);
+  function regionSetKey(raw: RawTable): string {
+    const ids: string[] = raw.regions.map((r) => r.regionId);
     return ids.slice().sort().join(",");
   }
 
   interface TodayResult { rawDice: number; diceTotal: number; outcome: string }
 
   const payload = await prisma.$transaction(async (tx) => {
-    // Update CampaignState (todayWeatherJson written after rolls are computed — see below)
-    await tx.campaignState.upsert({
-      where: { campaignId },
-      create: { campaignId, currentDate: newDateStr },
-      update: { currentDate: newDateStr },
-    });
-
     // ── Weather (CALENDAR tables) ───────────────────────────────────────────────
 
     const calendarTables = await tx.randomTable.findMany({
@@ -138,7 +131,7 @@ export async function POST(request: NextRequest) {
 
       // Non-forecasting: persist lastResult as usual
       if (!forecastingMode) {
-        const needsPersist = raw.isStateful || raw.modifiers.some((m: any) => m.behavior === "PREV_RESULT_CONDITION");
+        const needsPersist = raw.isStateful || raw.modifiers.some((m) => m.behavior === "PREV_RESULT_CONDITION");
         if (needsPersist) {
           await tx.randomTable.update({
             where: { id: raw.id },
@@ -148,13 +141,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Persist today's weather rolls so they can be restored on page reload
-    if (weatherRolls.length > 0) {
-      await tx.campaignState.update({
-        where: { campaignId },
-        data: { todayWeatherJson: JSON.stringify(weatherRolls) },
-      });
-    }
+    // Only include todayWeatherJson in the write when there's something to persist —
+    // preserves prior behavior where a day with no CALENDAR tables left yesterday's
+    // stored weather untouched (rather than clobbering it with "[]").
+    const weatherJsonWrite =
+      weatherRolls.length > 0 ? { todayWeatherJson: JSON.stringify(weatherRolls) } : {};
+
+    // Update CampaignState: date always moves; weather is folded in when present.
+    await tx.campaignState.upsert({
+      where: { campaignId },
+      create: { campaignId, currentDate: newDateStr, ...weatherJsonWrite },
+      update: { currentDate: newDateStr, ...weatherJsonWrite },
+    });
 
     // ── Pass 2: tomorrow's forecast (forecasting mode only) ─────────────────────
     // Loops over tables valid for TOMORROW independently, so season-boundary tables

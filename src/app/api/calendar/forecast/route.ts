@@ -13,7 +13,7 @@ import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
 import { parseDate, formatDate, advanceDate, getCurrentSeason } from "@/lib/calendar/engine";
 import { rollOnTable } from "@/lib/tables/engine";
-import { shapeTable, tableInclude } from "@/lib/tables/shape-table";
+import { shapeTable, tableInclude, type RawTable } from "@/lib/tables/shape-table";
 import { rollEncounterFull, rollEncounterForWindows, lookupOutcomeByRoll } from "@/lib/tables/encounter-roll";
 import { parseEncounterWindows } from "@/lib/encounter-timing";
 import { seasonFilterPasses } from "@/lib/tables/season-filter";
@@ -80,14 +80,14 @@ export async function GET(request: NextRequest) {
   const tomorrowSeasonName = getCurrentSeason(tomorrowParsed, parsedConfig)?.name ?? null;
 
   // Filter helper: mirrors the logic in the advance route
-  function tablePassesFilter(raw: any, seasonName: string | null): boolean {
-    const regionIds: string[] = raw.regions.map((r: any) => r.regionId);
+  function tablePassesFilter(raw: RawTable, seasonName: string | null): boolean {
+    const regionIds: string[] = raw.regions.map((r) => r.regionId);
     if (regionIds.length > 0 && !regionIds.includes(currentRegionId)) return false;
     return seasonFilterPasses(raw, seasonName);
   }
 
-  function regionSetKey(raw: any): string {
-    const ids: string[] = raw.regions.map((r: any) => r.regionId);
+  function regionSetKey(raw: RawTable): string {
+    const ids: string[] = raw.regions.map((r) => r.regionId);
     return ids.slice().sort().join(",");
   }
 
