@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
+import type { RawTable } from "@/lib/tables/shape-table";
 
 const TABLE_CATEGORIES = ["NPC", "ENCOUNTER", "CALENDAR", "REACTION", "MORALE", "GENERAL"] as const;
 
@@ -140,7 +141,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   return NextResponse.json({ success: true });
 }
 
-function normalizeTable(table: any) {
+function normalizeTable(table: RawTable) {
   return {
     ...table,
     seasonName: table.seasonName ?? null,
@@ -154,12 +155,12 @@ function normalizeTable(table: any) {
     prerequisiteMin: table.prerequisiteMin ?? null,
     prerequisiteMax: table.prerequisiteMax ?? null,
     lastModifiedResult: table.lastModifiedResult ?? null,
-    regionIds: table.regions.map((r: any) => r.regionId),
-    modifiers: table.modifiers.map((m: any) => ({
+    regionIds: table.regions.map((r) => r.regionId),
+    modifiers: table.modifiers.map((m) => ({
       ...m,
       extraConfig: m.extraConfig ? JSON.parse(m.extraConfig) : null,
-      autoRegionIds: m.autoRegions.map((r: any) => r.id),
-      conditionalRegionIds: m.conditionalRegions.map((r: any) => r.id),
+      autoRegionIds: m.autoRegions.map((r) => r.id),
+      conditionalRegionIds: m.conditionalRegions.map((r) => r.id),
     })),
   };
 }

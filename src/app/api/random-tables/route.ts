@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
 import { createTableSchema as createSchema } from "@/lib/tables/table-schemas";
+import type { RawTable } from "@/lib/tables/shape-table";
 
 export async function GET(request: NextRequest) {
   const { userId } = await requireSession();
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Shape the Prisma result into the RandomTable type used client-side
-function normalizeTable(table: any) {
+function normalizeTable(table: RawTable) {
   return {
     ...table,
     seasonName: table.seasonName ?? null,
@@ -93,12 +94,12 @@ function normalizeTable(table: any) {
     prerequisiteMin: table.prerequisiteMin ?? null,
     prerequisiteMax: table.prerequisiteMax ?? null,
     lastModifiedResult: table.lastModifiedResult ?? null,
-    regionIds: table.regions.map((r: any) => r.regionId),
-    modifiers: table.modifiers.map((m: any) => ({
+    regionIds: table.regions.map((r) => r.regionId),
+    modifiers: table.modifiers.map((m) => ({
       ...m,
       extraConfig: m.extraConfig ? JSON.parse(m.extraConfig) : null,
-      autoRegionIds: m.autoRegions.map((r: any) => r.id),
-      conditionalRegionIds: m.conditionalRegions.map((r: any) => r.id),
+      autoRegionIds: m.autoRegions.map((r) => r.id),
+      conditionalRegionIds: m.conditionalRegions.map((r) => r.id),
     })),
   };
 }

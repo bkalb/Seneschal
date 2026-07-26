@@ -11,7 +11,7 @@ export const tableInclude = {
 /** `tableInclude` plus the owning campaign — for routes that need campaign defaults. */
 export const tableIncludeWithCampaign = { ...tableInclude, campaign: true } as const;
 
-type RawTable = Prisma.RandomTableGetPayload<{ include: typeof tableInclude }>;
+export type RawTable = Prisma.RandomTableGetPayload<{ include: typeof tableInclude }>;
 
 /**
  * Converts a raw Prisma RandomTable (with nested relations) into the shape
