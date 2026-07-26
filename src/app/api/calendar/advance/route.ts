@@ -9,6 +9,7 @@ import { rollEncounterFull, rollEncounterForWindows } from "@/lib/tables/encount
 import { parseEncounterWindows } from "@/lib/encounter-timing";
 import { buildDoc, appendToDoc, buildDaySummaryNodes } from "@/lib/calendar/note-builder";
 import { seasonFilterPasses } from "@/lib/tables/season-filter";
+import { serializeTodayWeather } from "@/lib/calendar/today-weather";
 import type { RandomTable } from "@/types/table";
 import type { EncounterSummary } from "@/lib/tables/encounter-roll";
 
@@ -141,17 +142,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Only include todayWeatherJson in the write when there's something to persist —
-    // preserves prior behavior where a day with no CALENDAR tables left yesterday's
-    // stored weather untouched (rather than clobbering it with "[]").
-    const weatherJsonWrite =
-      weatherRolls.length > 0 ? { todayWeatherJson: JSON.stringify(weatherRolls) } : {};
+    // Always write todayWeatherJson, date-stamped to newDateStr — even when
+    // weatherRolls is empty. An empty-but-current entry is an honest "nothing
+    // qualified today" and lets readers (see forecast route) distinguish it
+    // from a stale value left over from a previous day.
+    const todayWeatherJson = serializeTodayWeather(newDateStr, weatherRolls);
 
-    // Update CampaignState: date always moves; weather is folded in when present.
+    // Update CampaignState: date always moves; weather is folded in alongside it.
     await tx.campaignState.upsert({
       where: { campaignId },
-      create: { campaignId, currentDate: newDateStr, ...weatherJsonWrite },
-      update: { currentDate: newDateStr, ...weatherJsonWrite },
+      create: { campaignId, currentDate: newDateStr, todayWeatherJson },
+      update: { currentDate: newDateStr, todayWeatherJson },
     });
 
     // ── Pass 2: tomorrow's forecast (forecasting mode only) ─────────────────────

@@ -2,10 +2,13 @@
  * GET /api/calendar/forecast
  *
  * Returns today's and tomorrow's weather rolls for the current region.
- * On page load, retrieves stored data from the last "Advance Day". If no
- * stored data exists (e.g. forecasting was just enabled, or today's weather
- * was never rolled), rolls fresh and persists the results so they can be
- * restored on subsequent reloads.
+ * On page load, retrieves stored data from the last "Advance Day". The
+ * stored today-weather is date-stamped; it is only trusted when its date
+ * matches the request's `currentDate`. If it is missing, unattributed
+ * (e.g. legacy pre-date-stamp data), or stamped for a different date, it is
+ * treated as stale: fresh rolls are computed and persisted (date-stamped to
+ * `currentDate`) so subsequent reloads on the same day reuse them — even
+ * when the fresh result is an empty list (nothing qualified today).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -17,6 +20,7 @@ import { shapeTable, tableInclude, type RawTable } from "@/lib/tables/shape-tabl
 import { rollEncounterFull, rollEncounterForWindows, lookupOutcomeByRoll } from "@/lib/tables/encounter-roll";
 import { parseEncounterWindows } from "@/lib/encounter-timing";
 import { seasonFilterPasses } from "@/lib/tables/season-filter";
+import { parseTodayWeather, serializeTodayWeather } from "@/lib/calendar/today-weather";
 import type { RandomTable } from "@/types/table";
 import type { EncounterSummary } from "@/lib/tables/encounter-roll";
 
@@ -47,9 +51,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Restore today's weather from CampaignState
-  const todayWeatherJson = campaign.state?.todayWeatherJson ?? null;
-  const todayRolls: RollResult[] = todayWeatherJson ? JSON.parse(todayWeatherJson) : [];
+  // Restore today's weather from CampaignState, and determine whether it's
+  // still current (date-stamped for `currentDate`) or stale.
+  const storedTodayWeather = parseTodayWeather(campaign.state?.todayWeatherJson ?? null);
+  const isTodayWeatherStale = storedTodayWeather.date !== currentDate;
+  const todayRolls: RollResult[] = storedTodayWeather.rolls;
 
   // Load calendar config to compute dates and seasons
   const calendarConfig = await prisma.calendarConfig.findUnique({
@@ -57,7 +63,9 @@ export async function GET(request: NextRequest) {
     include: { moons: true },
   });
   if (!calendarConfig) {
-    return NextResponse.json({ todayRolls, forecastRolls: [] });
+    // Can't compute fresh rolls without config, so a stale stored value can't
+    // be trusted or recomputed here — report empty rather than serving stale data.
+    return NextResponse.json({ todayRolls: isTodayWeatherStale ? [] : todayRolls, forecastRolls: [] });
   }
 
   const parsedConfig = {
@@ -99,11 +107,14 @@ export async function GET(request: NextRequest) {
     });
 
     // ── Today's weather ─────────────────────────────────────────────────────────
-    // Use stored data if available; otherwise roll fresh and persist.
+    // Use stored data if it's date-stamped for `currentDate`; otherwise it's
+    // stale (missing, unattributed legacy data, or stamped for a different
+    // day) so roll fresh and persist — even if the fresh result is empty,
+    // so an "nothing qualified today" outcome doesn't get re-rolled on every load.
 
     let localTodayRolls = todayRolls;
 
-    if (localTodayRolls.length === 0) {
+    if (isTodayWeatherStale) {
       const freshTodayRolls: RollResult[] = [];
       for (const raw of allCalendarTables) {
         if (!tablePassesFilter(raw, todaySeasonName)) continue;
@@ -126,13 +137,11 @@ export async function GET(request: NextRequest) {
           roll: result.diceTotal,
         });
       }
-      if (freshTodayRolls.length > 0) {
-        localTodayRolls = freshTodayRolls;
-        await tx.campaignState.update({
-          where: { campaignId },
-          data: { todayWeatherJson: JSON.stringify(freshTodayRolls) },
-        });
-      }
+      localTodayRolls = freshTodayRolls;
+      await tx.campaignState.update({
+        where: { campaignId },
+        data: { todayWeatherJson: serializeTodayWeather(currentDate, freshTodayRolls) },
+      });
     }
 
     // ── Tomorrow's forecast ─────────────────────────────────────────────────────
