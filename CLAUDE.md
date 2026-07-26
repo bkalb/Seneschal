@@ -9,10 +9,12 @@ This project uses **Next.js 16.2.2**, which may have breaking changes from your 
 ## Commands
 
 ```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run start    # Start production server
-npm run lint     # Run ESLint
+npm run dev         # Start development server
+npm run build       # Build for production
+npm run start       # Start production server
+npm run lint        # Run ESLint
+npm test            # Run the vitest suite once (vitest run)
+npm run test:watch  # Run vitest in watch mode
 ```
 
 **Database:**
@@ -25,7 +27,7 @@ npx prisma studio        # Open Prisma Studio UI
 
 **Important:** After any change to `prisma/schema.prisma`, always run `npx prisma generate` to regenerate the Prisma client. `db push` / `migrate dev` sync the database but do not update the generated client types — skipping this causes runtime "Unknown argument" errors.
 
-There are no automated tests — this is a local-first tool.
+A vitest suite lives in `src/__tests__/`. Run it with `npm test` (or `npm run test:watch` while iterating). This is still a local-first tool with no CI deployment pipeline.
 
 ## Architecture Overview
 

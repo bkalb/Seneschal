@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { SaveBatchDialog } from "@/components/npc/SaveBatchDialog";
 import type { GeneratedNpc } from "@/types/npc";
 import type { NpcAffiliationData } from "@/types/savedNpc";
@@ -153,7 +153,7 @@ describe("SaveBatchDialog", () => {
     expect(screen.getByText("Saving…")).toBeInTheDocument();
   });
 
-  it("calls onClose when Cancel is clicked", () => {
+  it("calls onClose when the footer Close button is clicked", () => {
     const onClose = vi.fn();
     render(
       <SaveBatchDialog
@@ -164,7 +164,10 @@ describe("SaveBatchDialog", () => {
         onClose={onClose}
       />
     );
-    fireEvent.click(screen.getByText("Cancel"));
+    // Two elements are named "Close": the corner icon button and the footer
+    // button rendered by DialogFooter's showCloseButton. Scope to the footer.
+    const footer = document.querySelector('[data-slot="dialog-footer"]')!;
+    fireEvent.click(within(footer as HTMLElement).getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 

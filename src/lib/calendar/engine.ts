@@ -14,6 +14,17 @@ export function formatDate(d: CalendarDate): CalendarDateString {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Human-readable display string for a campaign date, e.g.
+ * "1247-08-12" -> "12 Harvestmoon 1247". Falls back to `Month ${m}` for an
+ * out-of-range month index, matching the inline fallback used elsewhere.
+ */
+export function formatCampaignDate(s: CalendarDateString, config: CalendarConfig): string {
+  const date = parseDate(s);
+  const monthName = config.months[date.month - 1]?.name ?? `Month ${date.month}`;
+  return `${date.day} ${monthName} ${date.year}`;
+}
+
 // ─── Absolute day count ───────────────────────────────────────────────────────
 
 /**

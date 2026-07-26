@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import type { GeneratedNpc, GenderSelection, NpcProfile, NpcProfileConfig } from "@/types/npc";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type { GeneratedNpc, GenderSelection, NpcField, NpcProfile, NpcProfileConfig } from "@/types/npc";
+import type { NpcResultSet } from "@/types/npcHistory";
 import { useNpcProfiles, useCreateNpcProfile, useSaveNpcProfile, useDeleteNpcProfile } from "@/hooks/useNpcProfile";
 import { useRandomTables } from "@/hooks/useRandomTables";
-import { generateNpcBatch } from "@/lib/npc/generator";
+import { useCalendarConfig } from "@/hooks/useCalendar";
+import { generateNpcBatch, rerollNpc, rerollNpcField } from "@/lib/npc/generator";
+import { formatCampaignDate } from "@/lib/calendar/engine";
+import { useNpcHistoryStore, selectSets } from "@/stores/npcHistoryStore";
 import { NpcProfileEditor } from "./NpcProfileEditor";
 import { NpcTableManager } from "./NpcTableManager";
 import { TableImportWizard } from "@/components/tables/TableImportWizard";
@@ -12,18 +16,20 @@ import { SaveBatchDialog } from "./SaveBatchDialog";
 import { NpcBrowser } from "./NpcBrowser";
 import { NpcDetailPanel } from "./NpcDetailPanel";
 import { NpcCreatorModal } from "./NpcCreatorModal";
+import { NpcHistoryList } from "./NpcHistoryList";
 import { useSaveSingleNpc, useSaveBatchNpcs, useNpcAffiliations } from "@/hooks/useSavedNpcs";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import { BookmarkIcon, UploadIcon, AlignJustifyIcon, Settings2Icon, CopyIcon, PlusIcon } from "lucide-react";
 
 interface Props {
   campaignId: string;
   currentRegionId: string | null;
   regions: { id: string; name: string }[];
+  /** Campaign's current in-game date ("YYYY-MM-DD"), stamped onto each generated set. */
+  currentDate: string;
 }
 
 const GENDER_OPTIONS: { value: GenderSelection; label: string }[] = [
@@ -43,125 +49,44 @@ function isConfigured(config: NpcProfileConfig): boolean {
   );
 }
 
-function NpcCard({
-  npc,
-  showIndex,
-  index,
-  onSave,
-  isSaved,
-  isSaving,
-}: {
-  npc: GeneratedNpc;
-  showIndex: boolean;
-  index: number;
-  onSave?: () => void;
-  isSaved?: boolean;
-  isSaving?: boolean;
-}) {
-  const isMale = npc.gender === "male";
-
-  return (
-    <div className="rounded-lg border border-border bg-card p-2.5 space-y-1">
-      {/* Header: name (or index fallback) + gender + save */}
-      <div className="flex items-baseline justify-between gap-1 pb-0.5 border-b border-border/60">
-        <p className="text-xs font-semibold text-foreground leading-tight truncate">
-          {npc.name ?? (showIndex ? `#${index + 1}` : "—")}
-        </p>
-        <div className="flex items-center gap-1 shrink-0">
-          {onSave && (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={onSave}
-              disabled={isSaved || isSaving}
-              title={isSaved ? "Saved" : "Save this NPC"}
-              aria-label={isSaved ? "NPC saved" : "Save NPC"}
-              className={cn(isSaved ? "text-green-600 dark:text-green-500 disabled:opacity-100" : "")}
-            >
-              {isSaved ? "✓ Saved" : "Save"}
-            </Button>
-          )}
-          <span className={cn("text-sm font-bold", isMale ? "text-blue-600 dark:text-blue-400" : "text-pink-600 dark:text-pink-400")}>
-            {isMale ? "♂" : "♀"}
-          </span>
-        </div>
-      </div>
-
-      {/* Type */}
-      {npc.type !== null && (
-        <div>
-          <span className="text-[10px] font-semibold text-muted-foreground">{npc.typeLabel}: </span>
-          <span className="text-xs text-foreground">{npc.type}</span>
-        </div>
-      )}
-
-      {/* Secondary type */}
-      {npc.secondaryType !== null && npc.secondaryTypeLabel && (
-        <div>
-          <span className="text-[10px] font-semibold text-muted-foreground">{npc.secondaryTypeLabel}: </span>
-          <span className="text-xs text-foreground">{npc.secondaryType}</span>
-        </div>
-      )}
-
-      {/* Age */}
-      {npc.age !== null && (
-        <div>
-          <span className="text-[10px] font-semibold text-muted-foreground">Age: </span>
-          <span className="text-xs text-foreground">{npc.age}</span>
-        </div>
-      )}
-
-      {/* Physical traits */}
-      {npc.physical.map((trait, i) => (
-        <div key={`phys-${i}`}>
-          <span className="text-[10px] font-semibold text-muted-foreground">Physical: </span>
-          <span className="text-xs text-foreground">{trait}</span>
-        </div>
-      ))}
-
-      {/* Personality traits */}
-      {npc.personality.map((trait, i) => (
-        <div key={`pers-${i}`}>
-          <span className="text-[10px] font-semibold text-muted-foreground">Personality: </span>
-          <span className="text-xs text-foreground">{trait}</span>
-        </div>
-      ))}
-
-      {/* Detail rolls */}
-      {npc.details.map((d, i) => (
-        <div key={`det-${i}`}>
-          <span className="text-[10px] font-semibold text-muted-foreground">{d.label}: </span>
-          <span className="text-xs text-foreground">{d.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
+export function NpcPanel({ campaignId, currentRegionId, regions, currentDate }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showManager, setShowManager] = useState(false);
-  const [showSaveBatch, setShowSaveBatch] = useState(false);
+  const [saveBatchTarget, setSaveBatchTarget] = useState<NpcResultSet | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
   const [showCreator, setShowCreator] = useState(false);
   const [selectedSavedNpc, setSelectedSavedNpc] = useState<import("@/types/savedNpc").SavedNpcData | null>(null);
   const [genderSelection, setGenderSelection] = useState<GenderSelection>("random");
   const [count, setCount] = useState(1);
-  const [npcs, setNpcs] = useState<GeneratedNpc[]>([]);
-  const [savedIndices, setSavedIndices] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: profiles, isLoading: profilesLoading } = useNpcProfiles(campaignId);
   const { data: tables, isLoading: tablesLoading } = useRandomTables(campaignId, "NPC");
+  const { data: calendarConfig } = useCalendarConfig(campaignId);
   const { data: affiliations = [] } = useNpcAffiliations(campaignId);
   const createMutation = useCreateNpcProfile(campaignId);
   const saveMutation = useSaveNpcProfile(campaignId);
   const deleteMutation = useDeleteNpcProfile(campaignId);
   const saveSingleMutation = useSaveSingleNpc(campaignId);
   const saveBatchMutation = useSaveBatchNpcs(campaignId);
+
+  const retention = useNpcHistoryStore((s) => s.retention);
+  const setRetention = useNpcHistoryStore((s) => s.setRetention);
+  const sets = useNpcHistoryStore(useMemo(() => selectSets(campaignId), [campaignId]));
+  const pushSet = useNpcHistoryStore((s) => s.pushSet);
+  const updateNpc = useNpcHistoryStore((s) => s.updateNpc);
+  const markSaved = useNpcHistoryStore((s) => s.markSaved);
+  const togglePin = useNpcHistoryStore((s) => s.togglePin);
+  const dismissSet = useNpcHistoryStore((s) => s.dismissSet);
+  const clearHistory = useNpcHistoryStore((s) => s.clear);
+
+  // Keyed table lookup for re-roll (§9.6). Threaded down to the leaf card rather
+  // than fetched there — `useRandomTables` only runs here.
+  const tableMap = useMemo(() => new Map((tables ?? []).map((t) => [t.id, t])), [tables]);
 
   // Auto-select the first profile once loaded
   useEffect(() => {
@@ -172,21 +97,41 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
 
   const selectedProfile = profiles?.find((p) => p.id === selectedProfileId) ?? null;
   const hasConfig = selectedProfile ? isConfigured(selectedProfile.config) : false;
+  const historyEmpty = sets.length === 0;
 
   function handleGenerate() {
     if (!selectedProfile || !tables) return;
     setError(null);
-    setSavedIndices(new Set());
 
-    const tableMap = new Map(tables.map((t) => [t.id, t]));
     const n = Math.max(1, Math.min(count, 100));
-    setNpcs(generateNpcBatch(n, selectedProfile, tableMap, currentRegionId, genderSelection));
+    const npcs = generateNpcBatch(n, selectedProfile, tableMap, currentRegionId, genderSelection);
+
+    const regionName = regions.find((r) => r.id === currentRegionId)?.name ?? null;
+    // Missing calendar config -> both the raw date and its label are omitted (D9).
+    const inGameDate = calendarConfig ? currentDate : null;
+    const inGameDateLabel = calendarConfig ? formatCampaignDate(currentDate, calendarConfig) : null;
+
+    const resultSet: NpcResultSet = {
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      profileId: selectedProfile.id,
+      profileName: selectedProfile.name,
+      inGameDate,
+      inGameDateLabel,
+      regionId: currentRegionId,
+      regionName,
+      pinned: false,
+      npcs,
+    };
+
+    pushSet(campaignId, resultSet);
+    if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
   }
 
-  async function handleSaveSingle(npc: GeneratedNpc, idx: number) {
+  async function handleSaveSingle(setId: string, index: number, npc: GeneratedNpc) {
     try {
-      await saveSingleMutation.mutateAsync(npc);
-      setSavedIndices((prev) => new Set(prev).add(idx));
+      const created = await saveSingleMutation.mutateAsync(npc);
+      markSaved(campaignId, setId, index, created.id);
       toast.success(`${npc.name ?? "NPC"} saved`);
     } catch {
       toast.error("Failed to save NPC");
@@ -194,16 +139,19 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
   }
 
   async function handleSaveBatch(selectedNpcs: GeneratedNpc[], affiliationName: string | undefined) {
+    if (!saveBatchTarget) return;
     try {
-      await saveBatchMutation.mutateAsync({ npcs: selectedNpcs, affiliationName });
-      // Mark all saved NPCs by matching them back to their original indices
-      const savedSet = new Set(selectedNpcs);
-      setSavedIndices((prev) => {
-        const next = new Set(prev);
-        npcs.forEach((n, i) => { if (savedSet.has(n)) next.add(i); });
-        return next;
+      const created = await saveBatchMutation.mutateAsync({ npcs: selectedNpcs, affiliationName });
+      // Mark each saved NPC by its index within the originating set. Batch
+      // save preserves selection order (§10), so created[i] corresponds to
+      // selectedNpcs[i]; we look up each npc's original slot in the set to
+      // mark it there. This replaces object-identity matching against a flat
+      // `npcs` array, which can't survive a re-roll swapping the object out.
+      selectedNpcs.forEach((npc, i) => {
+        const idx = saveBatchTarget.npcs.indexOf(npc);
+        if (idx !== -1) markSaved(campaignId, saveBatchTarget.id, idx, created[i]?.id ?? null);
       });
-      setShowSaveBatch(false);
+      setSaveBatchTarget(null);
       toast.success(
         affiliationName
           ? `${selectedNpcs.length} NPC${selectedNpcs.length > 1 ? "s" : ""} saved to "${affiliationName}"`
@@ -212,6 +160,24 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
     } catch {
       toast.error("Failed to save NPCs");
     }
+  }
+
+  function handleRerollCard(setId: string, index: number, npc: GeneratedNpc) {
+    const targetSet = sets.find((s) => s.id === setId);
+    if (!targetSet) return;
+    // Seed with the OTHER names in the same set so a re-roll doesn't collide
+    // with its neighbors (§6.2's closing note).
+    const usedNames = new Set(
+      targetSet.npcs
+        .filter((_, i) => i !== index)
+        .map((n) => n.name)
+        .filter((n): n is string => n !== null)
+    );
+    updateNpc(campaignId, setId, index, rerollNpc(npc, tableMap, usedNames));
+  }
+
+  function handleRerollField(setId: string, index: number, npc: GeneratedNpc, field: NpcField) {
+    updateNpc(campaignId, setId, index, rerollNpcField(npc, field, tableMap));
   }
 
   async function handleCreateProfile() {
@@ -235,7 +201,6 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
     const remaining = (profiles ?? []).filter((p) => p.id !== profile.id);
     setSelectedProfileId(remaining[0]?.id ?? null);
     setShowEditor(false);
-    setNpcs([]);
   }
 
   const isLoading = profilesLoading || tablesLoading;
@@ -279,7 +244,7 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
       <div className="flex items-center gap-1.5">
         <select
           value={selectedProfileId ?? ""}
-          onChange={(e) => { setSelectedProfileId(e.target.value || null); setNpcs([]); setError(null); }}
+          onChange={(e) => { setSelectedProfileId(e.target.value || null); setError(null); }}
           className="flex-1 min-w-0 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
           disabled={!profiles || profiles.length === 0}
         >
@@ -371,54 +336,34 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
       {/* Error */}
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      {/* Results */}
-      {npcs.length > 0 ? (
-        <div className="flex flex-col gap-2 min-h-0">
-          {/* Actions row above cards */}
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" size="xs" onClick={handleGenerate} className="text-muted-foreground">
-              Re-roll
-            </Button>
-            {npcs.length > 1 && (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setShowSaveBatch(true)}
-                className="text-muted-foreground"
-                aria-label="Save all NPCs as a group"
-              >
-                Save as Group…
-              </Button>
-            )}
-          </div>
-          <div className={[
-            "overflow-y-auto max-h-96 pr-0.5",
-            npcs.length > 1 ? "grid grid-cols-2 gap-2 content-start" : "space-y-2",
-          ].join(" ")}>
-            {npcs.map((npc, idx) => (
-              <NpcCard
-                key={idx}
-                npc={npc}
-                showIndex={npcs.length > 1}
-                index={idx}
-                onSave={() => handleSaveSingle(npc, idx)}
-                isSaved={savedIndices.has(idx)}
-                isSaving={saveSingleMutation.isPending}
-              />
-            ))}
-          </div>
-        </div>
-      ) : selectedProfile && !hasConfig ? (
+      {/* History / results */}
+      {selectedProfile && !hasConfig && historyEmpty ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
           <p className="text-sm text-muted-foreground">No tables configured.</p>
           <Button variant="link" size="xs" onClick={() => setShowEditor(true)} className="mt-1">Configure this profile</Button>
         </div>
-      ) : !selectedProfile && !profilesLoading ? (
+      ) : !selectedProfile && !profilesLoading && historyEmpty ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
           <p className="text-sm text-muted-foreground">No profiles yet.</p>
           <Button variant="link" size="xs" onClick={handleCreateProfile} className="mt-1">Create one</Button>
         </div>
-      ) : null}
+      ) : (
+        <NpcHistoryList
+          sets={sets}
+          retention={retention}
+          tableMap={tableMap}
+          onRetentionChange={setRetention}
+          onClearAll={() => clearHistory(campaignId)}
+          onTogglePin={(setId) => togglePin(campaignId, setId)}
+          onDismiss={(setId) => dismissSet(campaignId, setId)}
+          onSaveSingle={handleSaveSingle}
+          onSaveBatch={(set) => setSaveBatchTarget(set)}
+          onRerollCard={handleRerollCard}
+          onRerollField={handleRerollField}
+          isSavingSingle={saveSingleMutation.isPending}
+          scrollContainerRef={scrollContainerRef}
+        />
+      )}
 
       {/* Modals */}
       {showCreator && selectedProfile && tables && (
@@ -447,13 +392,13 @@ export function NpcPanel({ campaignId, currentRegionId, regions }: Props) {
           onDeleted={() => { setSelectedSavedNpc(null); }}
         />
       )}
-      {showSaveBatch && npcs.length > 1 && (
+      {saveBatchTarget && saveBatchTarget.npcs.length > 1 && (
         <SaveBatchDialog
-          npcs={npcs}
+          npcs={saveBatchTarget.npcs}
           affiliations={affiliations}
           isSaving={saveBatchMutation.isPending}
           onSave={handleSaveBatch}
-          onClose={() => setShowSaveBatch(false)}
+          onClose={() => setSaveBatchTarget(null)}
         />
       )}
       {showManager && tables && (

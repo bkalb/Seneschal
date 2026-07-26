@@ -3,6 +3,7 @@ import type { CalendarConfig } from "@/types/calendar";
 import {
   parseDate,
   formatDate,
+  formatCampaignDate,
   dateToAbsoluteDays,
   absoluteDaysToDate,
   yearLength,
@@ -89,6 +90,21 @@ describe("parseDate / formatDate", () => {
     const d = parseDate("1234-11-22");
     expect(d).toEqual({ year: 1234, month: 11, day: 22 });
     expect(formatDate(d)).toBe("1234-11-22");
+  });
+});
+
+describe("formatCampaignDate", () => {
+  it("renders day, month name, and year", () => {
+    expect(formatCampaignDate("1247-08-12", fullConfig)).toBe("12 Aug 1247");
+  });
+
+  it("does not zero-pad the day", () => {
+    expect(formatCampaignDate("1247-01-05", fullConfig)).toBe("5 Jan 1247");
+  });
+
+  it("falls back to `Month ${m}` for an out-of-range month index, mirroring the inline fallback", () => {
+    // toyConfig only has 2 months; month 5 doesn't exist.
+    expect(formatCampaignDate("0001-05-03", toyConfig)).toBe("3 Month 5 1");
   });
 });
 

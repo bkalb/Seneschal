@@ -222,6 +222,7 @@ export default function AppShell({ campaign, allCampaigns, initialFlags }: AppSh
                 campaignId={campaign.id}
                 currentRegionId={currentRegionId}
                 regions={campaign.regions}
+                currentDate={campaign.state?.currentDate ?? "0001-01-01"}
               />
               <TablesPanel
                 key={mode}

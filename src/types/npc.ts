@@ -40,6 +40,26 @@ export interface NpcProfile {
 
 // ─── Generation result ────────────────────────────────────────────────────────
 
+/**
+ * Everything needed to re-roll an NPC exactly the way it was first made.
+ * Fully self-contained: rerollNpc() needs no set or profile context.
+ * `nameTableId` is the *resolved* table (resolveNameTable depends on the
+ * rolled type + gender), so it is genuinely per-NPC, not per-set.
+ */
+export interface NpcRecipe {
+  /** Region in effect at generation. Replayed on every re-roll (D11). */
+  regionId: string | null;
+  /** Gender selection in effect at generation. Re-applied on whole-card re-roll (D4). */
+  genderSelection: GenderSelection;
+  typeTableId: string | null;
+  secondaryTypeTableId: string | null;
+  ageTableId: string | null;
+  nameTableId: string | null;
+  physicalTableIds: string[];
+  personalityTableIds: string[];
+  detailTables: { label: string; tableId: string }[];
+}
+
 export interface GeneratedNpc {
   /** Resolved name from the matched name table. Null if no name table found. */
   name: string | null;
@@ -59,4 +79,18 @@ export interface GeneratedNpc {
   personality: string[];
   /** Outcomes from detail tables, each with its configured label. */
   details: { label: string; value: string }[];
+  /** Present on generated NPCs. Optional so older persisted history hydrates cleanly. */
+  recipe?: NpcRecipe;
+  /** Id of the library record this card was saved as. Cleared on re-roll (D8). */
+  savedNpcId?: string | null;
 }
+
+/** Re-roll target for per-field re-roll. */
+export type NpcField =
+  | { kind: "name" }
+  | { kind: "type" }
+  | { kind: "secondaryType" }
+  | { kind: "age" }
+  | { kind: "physical"; index: number }
+  | { kind: "personality"; index: number }
+  | { kind: "detail"; index: number };
