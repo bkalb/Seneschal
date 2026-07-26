@@ -37,4 +37,8 @@ export const createTableSchema = z.object({
   surpriseThreshold: z.number().int().nullable().optional(),
   npcForType: z.string().nullable().optional(),
   npcForGender: z.string().nullable().optional(),
+  applicableModes: z.enum(["OVERLAND", "DUNGEON", "BOTH"]).default("BOTH"),
+  prerequisiteDice: z.string().nullable().optional(),
+  prerequisiteMin: z.number().int().nullable().optional(),
+  prerequisiteMax: z.number().int().nullable().optional(),
 });

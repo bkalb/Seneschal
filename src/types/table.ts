@@ -121,6 +121,10 @@ export interface CreateTableInput {
   surpriseThreshold?: number | null;
   npcForType?: string | null;
   npcForGender?: string | null;
+  applicableModes?: "OVERLAND" | "DUNGEON" | "BOTH";
+  prerequisiteDice?: string | null;
+  prerequisiteMin?: number | null;
+  prerequisiteMax?: number | null;
 }
 
 /** Payload accepted by PATCH /api/random-tables/[id] (see `updateSchema` there). */

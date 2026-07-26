@@ -35,6 +35,7 @@ export function TableImportWizard({ campaignId, category, regions, seasons, onCl
   const [rollOnDayAdvance, setRollOnDayAdvance] = useState(false);
   const [selectedSeasons, setSelectedSeasons] = useState<string[]>([]);
   const [selectedRegionIds, setSelectedRegionIds] = useState<string[]>([]);
+  const [applicableModes, setApplicableModes] = useState<"BOTH" | "OVERLAND" | "DUNGEON">("BOTH");
   // Surprise roll config (ENCOUNTER only) — pre-populated from campaign defaults
   const [surpriseDice, setSurpriseDice] = useState(category === "ENCOUNTER" ? (defaultSurpriseDice ?? "") : "");
   const [surpriseThreshold, setSurpriseThreshold] = useState(
@@ -74,6 +75,7 @@ export function TableImportWizard({ campaignId, category, regions, seasons, onCl
       regionIds: selectedRegionIds,
       surpriseDice: surpriseDice.trim() || null,
       surpriseThreshold: threshold,
+      applicableModes,
     });
 
     onClose();
@@ -191,6 +193,27 @@ export function TableImportWizard({ campaignId, category, regions, seasons, onCl
                   />
                   Stateful (remembers last result)
                 </label>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Exploration mode</label>
+                <div className="flex gap-2">
+                  {(["BOTH", "OVERLAND", "DUNGEON"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setApplicableModes(m)}
+                      className={[
+                        "px-2.5 py-1 rounded-full text-xs border transition-colors",
+                        applicableModes === m
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-border text-muted-foreground hover:border-primary",
+                      ].join(" ")}
+                    >
+                      {m === "BOTH" ? "Both" : m === "OVERLAND" ? "Overland" : "Dungeon"}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {category === "CALENDAR" && (
