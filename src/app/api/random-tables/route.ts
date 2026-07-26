@@ -1,32 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireSession } from "@/lib/api-helpers";
-
-const TABLE_CATEGORIES = ["NPC", "ENCOUNTER", "CALENDAR", "REACTION", "MORALE", "GENERAL"] as const;
-
-const createSchema = z.object({
-  campaignId: z.string(),
-  name: z.string().min(1).max(200),
-  category: z.enum(TABLE_CATEGORIES),
-  diceExpression: z.string().min(1),
-  isStateful: z.boolean().default(false),
-  rollOnDayAdvance: z.boolean().default(false),
-  rows: z.array(z.object({ min: z.number().int(), max: z.number().int(), outcome: z.string() })),
-  modifiers: z.array(z.object({
-    label: z.string(),
-    behavior: z.enum(["ALWAYS", "AUTO_REGION", "CONDITIONAL_REGION"]),
-    rollAdjustment: z.number().int().default(0),
-    extraConfig: z.string().nullable().optional(),
-    autoRegionIds: z.array(z.string()).default([]),
-    conditionalRegionIds: z.array(z.string()).default([]),
-  })).default([]),
-  regionIds: z.array(z.string()).default([]),
-  surpriseDice: z.string().nullable().optional(),
-  surpriseThreshold: z.number().int().nullable().optional(),
-  npcForType: z.string().nullable().optional(),
-  npcForGender: z.string().nullable().optional(),
-});
+import { createTableSchema as createSchema } from "@/lib/tables/table-schemas";
 
 export async function GET(request: NextRequest) {
   const { userId } = await requireSession();

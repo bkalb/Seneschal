@@ -8,6 +8,7 @@ import { shapeTable, tableInclude } from "@/lib/tables/shape-table";
 import { rollEncounterFull, rollEncounterForWindows } from "@/lib/tables/encounter-roll";
 import { parseEncounterWindows } from "@/lib/encounter-timing";
 import { buildDoc, appendToDoc, buildDaySummaryNodes } from "@/lib/calendar/note-builder";
+import { seasonFilterPasses } from "@/lib/tables/season-filter";
 import type { RandomTable } from "@/types/table";
 import type { EncounterSummary } from "@/lib/tables/encounter-roll";
 
@@ -77,13 +78,7 @@ export async function POST(request: NextRequest) {
   function tablePassesFilter(raw: any, seasonName: string | null): boolean {
     const regionIds = raw.regions.map((r: any) => r.regionId);
     if (regionIds.length > 0 && (!currentRegionId || !regionIds.includes(currentRegionId))) return false;
-    if (raw.seasonName) {
-      const allowed = raw.seasonName.split(",").map((s: string) => s.trim());
-      if (!seasonName || !allowed.includes(seasonName)) {
-        return raw.rollWhenNoSeason === "always";
-      }
-    }
-    return true;
+    return seasonFilterPasses(raw, seasonName);
   }
 
   // Canonical key for a table's region set: sorted IDs joined, or "" for "all regions".

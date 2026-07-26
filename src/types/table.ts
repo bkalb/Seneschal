@@ -112,6 +112,8 @@ export interface CreateTableInput {
   diceExpression: string;
   isStateful?: boolean;
   rollOnDayAdvance?: boolean;
+  seasonName?: string | null;
+  rollWhenNoSeason?: RollWhenNoSeason;
   rows: TableRowInput[];
   modifiers?: CreateTableModifierInput[];
   regionIds?: string[];
