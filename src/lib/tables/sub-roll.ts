@@ -1,4 +1,4 @@
-import { rollExpression } from "@/lib/dice/roller";
+import { rollExpression, parseDiceExpression, DICE_BODY_SOURCE } from "@/lib/dice/roller";
 import { scanAndRollInlineNotation } from "@/lib/dice/outcome-expander";
 import type { TableRow } from "@/types/table";
 
@@ -36,18 +36,28 @@ export interface SubRoll {
  * Patterns we recognise as sub-roll instructions, in priority order.
  *
  * Each entry describes:
- *   pattern  — regex run against the outcome text (global, case-insensitive)
- *   die      — capture group index for the die size (e.g. "20" from "d20")
+ *   pattern  — regex run against the outcome text (global, case-insensitive).
+ *              The die notation itself is composed from roller.ts's
+ *              DICE_BODY_SOURCE (wrapped in a named `dice` group) so this
+ *              file never re-derives the dice grammar — see outcome-expander.ts
+ *              for the sibling that established the pattern.
  *   count    — number of times to roll; a function receiving the full match
  *              so rule-specific multipliers can be detected
  *   label    — short string shown in the UI, or null for single rolls
  *
  * To support a new ruleset, append entries here.
  * Patterns are tried in order; the first match per occurrence wins.
+ *
+ * Note: the leading "roll" prefix only tolerates an optional bare "a"
+ * (`roll a d20`), not a leading integer (`roll 1d20`) — DICE_BODY_SOURCE's
+ * own `(?<count>\d*)` group is what captures a leading count, and it must be
+ * given first crack at any digits immediately before the "d". Letting the
+ * prefix greedily eat digits too (as a naive `(?:\s+(?:a|\d+))?` would)
+ * strips the count off notations like "roll 4d6kh3" before the dice group
+ * ever sees it, silently downgrading them to 1dN.
  */
 const SUB_ROLL_PATTERNS: Array<{
   pattern: RegExp;
-  dieGroup: number;
   count: (match: RegExpMatchArray) => number;
   label: (match: RegExpMatchArray) => string | null;
 }> = [
@@ -56,19 +66,20 @@ const SUB_ROLL_PATTERNS: Array<{
   // "roll a d6 for each of the 3 groups" — an explicit leading integer in the
   // "each" clause overrides the DEFAULT_FOR_EACH_COUNT fallback.
   {
-    pattern: /\broll(?:\s+(?:a|\d+))?\s*d(\d+)\s+for\s+each\s+(?:of\s+(?:the\s+)?)?(\d+)?\s*(\w+)/gi,
-    dieGroup: 1,
+    pattern: new RegExp(
+      String.raw`\broll(?:\s+a)?\s*(?<dice>${DICE_BODY_SOURCE})\s+for\s+each\s+(?:of\s+(?:the\s+)?)?(?<eachCount>\d+)?\s*(?<eachNoun>\w+)`,
+      "gi"
+    ),
     count: (m) => {
-      const explicitCount = m[2] ? parseInt(m[2], 10) : NaN;
+      const explicitCount = m.groups!.eachCount ? parseInt(m.groups!.eachCount, 10) : NaN;
       return clampForEachCount(isNaN(explicitCount) ? DEFAULT_FOR_EACH_COUNT : explicitCount);
     },
-    label: (m) => `each ${m[2] ? `${m[2]} ` : ""}${m[3]}`, // e.g. "each side" or "each 3 groups"
+    label: (m) => `each ${m.groups!.eachCount ? `${m.groups!.eachCount} ` : ""}${m.groups!.eachNoun}`, // e.g. "each side" or "each 3 groups"
   },
 
-  // "roll a d20" / "roll 1d20" / "roll d20"
+  // "roll a d20" / "roll 1d20" / "roll d20" / "roll d%" / "roll 4d6kh3"
   {
-    pattern: /\broll(?:\s+(?:a|\d+))?\s*d(\d+)/gi,
-    dieGroup: 1,
+    pattern: new RegExp(String.raw`\broll(?:\s+a)?\s*(?<dice>${DICE_BODY_SOURCE})`, "gi"),
     count: () => 1,
     label: () => null,
   },
@@ -106,7 +117,7 @@ export function detectAndResolveSubRolls(text: string, rows: TableRow[]): SubRol
   const candidates: Array<{
     start: number;
     end: number;
-    sides: number;
+    notation: string;
     count: number;
     label: string | null;
   }> = [];
@@ -115,12 +126,16 @@ export function detectAndResolveSubRolls(text: string, rows: TableRow[]): SubRol
     spec.pattern.lastIndex = 0;
     let match: RegExpMatchArray | null;
     while ((match = spec.pattern.exec(text)) !== null) {
-      const sides = parseInt(match[spec.dieGroup], 10);
-      if (!sides || isNaN(sides)) continue;
+      const notation = match.groups!.dice;
+      // Validate against the shared grammar rather than trusting the regex
+      // match alone — skip anything that doesn't actually parse (shouldn't
+      // happen given DICE_BODY_SOURCE is the same source parseDiceExpression
+      // uses, but keeps the two from silently diverging in the future).
+      if (!parseDiceExpression(notation)) continue;
       candidates.push({
         start: match.index!,
         end: match.index! + match[0].length,
-        sides,
+        notation,
         count: spec.count(match),
         label: spec.label(match),
       });
@@ -139,10 +154,10 @@ export function detectAndResolveSubRolls(text: string, rows: TableRow[]): SubRol
     if (c.start < consumed) continue;
     consumed = c.end;
 
-    const notation = `d${c.sides}`;
+    const notation = c.notation;
     const results: SubRollEntry[] = [];
     for (let i = 0; i < c.count; i++) {
-      const rolled = rollExpression(`1d${c.sides}`);
+      const rolled = rollExpression(notation);
       const rawOutcome = lookupRow(rolled.total, rows);
       const resolved = scanAndRollInlineNotation(rawOutcome);
       results.push({
